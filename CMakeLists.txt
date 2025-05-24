@@ -1,21 +1,39 @@
-cmake_minimum_required(VERSION 3.5...4.0)
+cmake_minimum_required(VERSION 4.0)
+
 project(ffmpeg-gui VERSION 1.0 LANGUAGES C)
+set(CMAKE_C_STANDARD 99)
 
-find_package(SDL2 REQUIRED)
-find_package(SDL2_ttf REQUIRED)
-find_package(SDL2_image REQUIRED)
+# Adding Raylib
+include(FetchContent)
+set(FETCHCONTENT_QUIET FALSE)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE) # don't build the supplied examples
+set(BUILD_GAMES    OFF CACHE BOOL "" FORCE) # don't build the supplied example games
 
-file(GLOB SOURCES "src/*.c")
-file(COPY resources DESTINATION ${CMAKE_BINARY_DIR})
+FetchContent_Declare(
+    raylib
+    GIT_REPOSITORY "https://github.com/raysan5/raylib.git"
+    GIT_TAG "5.5"
+    GIT_PROGRESS TRUE
+    GIT_SHALLOW TRUE
+)
+    
+FetchContent_MakeAvailable(raylib)
+
+file(GLOB SOURCES "src/${PROJECT_NAME}.c")
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 
-target_include_directories(${PROJECT_NAME} PRIVATE "inc")
+# target_compile_options(${PROJECT_NAME} PUBLIC)
+# target_include_directories(${PROJECT_NAME} PUBLIC .)
 
-target_include_directories(${PROJECT_NAME} PRIVATE ${SDL2_INCLUDE_DIRS})
-target_include_directories(${PROJECT_NAME} PRIVATE SDL2_ttf::SDL2_ttf)
-target_include_directories(${PROJECT_NAME} PRIVATE SDL2_image::SDL2_image)
+target_link_libraries(${PROJECT_NAME} PRIVATE raylib)
 
-target_link_libraries(${PROJECT_NAME} PRIVATE ${SDL2_LIBRARIES})
-target_link_libraries(${PROJECT_NAME} PRIVATE SDL2_ttf::SDL2_ttf)
-target_link_libraries(${PROJECT_NAME} PRIVATE SDL2_image::SDL2_image)
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
+
+add_custom_command(
+    TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/resources
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>/resources
+)
