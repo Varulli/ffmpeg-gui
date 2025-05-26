@@ -256,13 +256,11 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         {
             if (key >= 32 && key <= 126)
             {
-                // printf("DEBUG: key (unicode) = %d\n", key);
             }
         }
 
         while ((key = GetKeyPressed()))
         {
-            // printf("DEBUG: key (keycode) = %d\n", key);
             if (key == KEY_LEFT &&
                 textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition > 0)
             {
@@ -273,6 +271,32 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition < textboxData.textboxBuffers[textboxData.focusData.focusIndex].length)
             {
                 textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition++;
+                textboxData.focusData.focusStartTime = GetTime();
+            }
+            if (key == KEY_TAB)
+            {
+                if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))
+                {
+                    textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + textboxData.nextTextboxIndex - 1) % textboxData.nextTextboxIndex;
+                }
+                else
+                {
+                    textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + 1) % textboxData.nextTextboxIndex;
+                }
+                textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition = textboxData.textboxBuffers[textboxData.focusData.focusIndex].length;
+                textboxData.focusData.focusStartTime = GetTime();
+            }
+        }
+    }
+    else
+    {
+        int key;
+        while ((key = GetKeyPressed()))
+        {
+            if (key == KEY_TAB)
+            {
+                textboxData.focusData.focusIndex = 0;
+                textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition = textboxData.textboxBuffers[textboxData.focusData.focusIndex].length;
                 textboxData.focusData.focusStartTime = GetTime();
             }
         }
