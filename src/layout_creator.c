@@ -34,7 +34,7 @@ typedef struct
 
 typedef struct
 {
-    char buffer[TEXTBOX_CHARS_MAX];
+    char chars[TEXTBOX_CHARS_MAX];
     size_t length;
     size_t cursorPosition;
 } TextboxBuffer;
@@ -48,9 +48,9 @@ typedef struct
 } TextboxData;
 
 TextboxBuffer textboxBuffers[] = {
-    {.buffer = {'T', ' ', '1', '\0'}, .length = 3, .cursorPosition = 0}, // Test 1
-    {.buffer = {'T', ' ', '2', '\0'}, .length = 3, .cursorPosition = 0}, // Test 2
-    {.buffer = {'T', ' ', '3', '\0'}, .length = 3, .cursorPosition = 0}, // Test 3
+    {.chars = {'T', ' ', '1', '\0'}, .length = 3, .cursorPosition = 0}, // Test 1
+    {.chars = {'T', ' ', '2', '\0'}, .length = 3, .cursorPosition = 0}, // Test 2
+    {.chars = {'T', ' ', '3', '\0'}, .length = 3, .cursorPosition = 0}, // Test 3
 };
 
 TextboxData textboxData = {
@@ -129,12 +129,12 @@ void RenderTextBox(Clay_String label)
                 Clay_String textBeforeCursor = {
                     .isStaticallyAllocated = true,
                     .length = textboxData.textboxBuffers[index].cursorPosition,
-                    .chars = textboxData.textboxBuffers[index].buffer,
+                    .chars = textboxData.textboxBuffers[index].chars,
                 };
                 Clay_String textAfterCursor = {
                     .isStaticallyAllocated = true,
                     .length = textboxData.textboxBuffers[index].length - textboxData.textboxBuffers[index].cursorPosition,
-                    .chars = textboxData.textboxBuffers[index].buffer + textboxData.textboxBuffers[index].cursorPosition,
+                    .chars = textboxData.textboxBuffers[index].chars + textboxData.textboxBuffers[index].cursorPosition,
                 };
 
                 Clay_TextElementConfig *textboxTextConfig = CLAY_TEXT_CONFIG({
@@ -249,28 +249,51 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         }
     }
 
+    TextboxBuffer *buffer;
+
     if (textboxData.focusData.focusIndex >= 0)
     {
+        buffer = &textboxData.textboxBuffers[textboxData.focusData.focusIndex];
+
         int key;
         while ((key = GetCharPressed()))
         {
-            if (key >= 32 && key <= 126)
+            printf("DEBUG: char = %d\n", key);
+            if (key >= 32 && key <= 126 && buffer->length < TEXTBOX_CHARS_MAX)
             {
+                size_t i = ++buffer->length;
+                for (i; i > buffer->cursorPosition; i--)
+                {
+                    buffer->chars[i] = buffer->chars[i - 1];
+                }
+                buffer->chars[buffer->cursorPosition] = key;
+                buffer->cursorPosition++;
             }
         }
 
         while ((key = GetKeyPressed()))
         {
-            if (key == KEY_LEFT &&
-                textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition > 0)
+            bool nonZeroCursorPosition = buffer->cursorPosition > 0;
+            bool nonMaxCursorPosition = buffer->cursorPosition < buffer->length;
+
+            if (key == KEY_BACKSPACE && nonZeroCursorPosition)
             {
-                textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition--;
+                size_t i = buffer->cursorPosition--;
+                for (i; i <= buffer->length; i++)
+                {
+                    buffer->chars[i - 1] = buffer->chars[i];
+                }
+                buffer->length--;
                 textboxData.focusData.focusStartTime = GetTime();
             }
-            if (key == KEY_RIGHT &&
-                textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition < textboxData.textboxBuffers[textboxData.focusData.focusIndex].length)
+            if (key == KEY_LEFT && nonZeroCursorPosition)
             {
-                textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition++;
+                buffer->cursorPosition--;
+                textboxData.focusData.focusStartTime = GetTime();
+            }
+            if (key == KEY_RIGHT && nonMaxCursorPosition)
+            {
+                buffer->cursorPosition++;
                 textboxData.focusData.focusStartTime = GetTime();
             }
             if (key == KEY_TAB)
@@ -283,7 +306,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 {
                     textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + 1) % textboxData.nextTextboxIndex;
                 }
-                textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition = textboxData.textboxBuffers[textboxData.focusData.focusIndex].length;
+                buffer->cursorPosition = buffer->length;
                 textboxData.focusData.focusStartTime = GetTime();
             }
         }
@@ -296,7 +319,8 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             if (key == KEY_TAB)
             {
                 textboxData.focusData.focusIndex = 0;
-                textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition = textboxData.textboxBuffers[textboxData.focusData.focusIndex].length;
+                buffer = &textboxData.textboxBuffers[textboxData.focusData.focusIndex];
+                buffer->cursorPosition = buffer->length;
                 textboxData.focusData.focusStartTime = GetTime();
             }
         }
