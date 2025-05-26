@@ -310,12 +310,52 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             }
             if (key == KEY_LEFT && nonZeroCursorPosition)
             {
-                buffer->cursorPosition--;
+                if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
+                {
+                    if (buffer->chars[buffer->cursorPosition - 1] == ' ')
+                    {
+                        while (buffer->cursorPosition > 0 && buffer->chars[buffer->cursorPosition - 1] == ' ')
+                        {
+                            buffer->cursorPosition--;
+                        }
+                    }
+                    else
+                    {
+                        while (buffer->cursorPosition > 0 && buffer->chars[buffer->cursorPosition - 1] != ' ')
+                        {
+                            buffer->cursorPosition--;
+                        }
+                    }
+                }
+                else
+                {
+                    buffer->cursorPosition--;
+                }
                 textboxData.focusData.focusStartTime = GetTime();
             }
             if (key == KEY_RIGHT && nonMaxCursorPosition)
             {
-                buffer->cursorPosition++;
+                if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
+                {
+                    if (buffer->chars[buffer->cursorPosition] == ' ')
+                    {
+                        while (buffer->cursorPosition < buffer->length && buffer->chars[buffer->cursorPosition] == ' ')
+                        {
+                            buffer->cursorPosition++;
+                        }
+                    }
+                    else
+                    {
+                        while (buffer->cursorPosition < buffer->length && buffer->chars[buffer->cursorPosition] != ' ')
+                        {
+                            buffer->cursorPosition++;
+                        }
+                    }
+                }
+                else
+                {
+                    buffer->cursorPosition++;
+                }
                 textboxData.focusData.focusStartTime = GetTime();
             }
             if (key == KEY_TAB)
