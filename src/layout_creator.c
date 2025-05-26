@@ -45,6 +45,7 @@ typedef struct
     size_t nextTextboxIndex;
     bool hoveringTextBox;
     FocusData focusData;
+    Vector2 minDimensions;
 } TextboxData;
 
 TextboxBuffer textboxBuffers[] = {
@@ -77,6 +78,10 @@ void HandleTextboxInteraction(Clay_ElementId elementId, Clay_PointerData pointer
     }
 }
 
+void HandleConvertButtonInteraction(Clay_ElementId elementId, Clay_PointerData pointerInfo, intptr_t userData)
+{
+}
+
 void RenderTextBox(Clay_String label)
 {
     size_t index = textboxData.nextTextboxIndex++;
@@ -102,6 +107,10 @@ void RenderTextBox(Clay_String label)
         uint16_t borderWidth = focused ? 2 : 1;
         CLAY({
             .layout = {
+                .sizing = {
+                    .width = {.size = {.minMax = {.min = textboxData.minDimensions.x}}},
+                    .height = {.size = {.minMax = {.min = textboxData.minDimensions.y + 8}}},
+                },
                 .padding = {8, 8, 4, 4},
             },
             .backgroundColor = COLOR_BG_TEXTBOX,
