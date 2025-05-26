@@ -26,6 +26,7 @@ typedef struct
 {
     bool focusRegistered;
     int focusIndex;
+    double focusStartTime;
 } FocusData;
 
 typedef struct
@@ -67,6 +68,7 @@ void HandleTextboxInteraction(Clay_ElementId elementId, Clay_PointerData pointer
     {
         textboxData.focusData.focusRegistered = true;
         textboxData.focusData.focusIndex = index;
+        textboxData.focusData.focusStartTime = GetTime();
     }
 }
 
@@ -92,6 +94,7 @@ void RenderTextBox(Clay_String label)
                              }));
         }
 
+        uint16_t borderWidth = focused ? 2 : 1;
         CLAY({
             .layout = {
                 .padding = {8, 8, 4, 4},
@@ -100,7 +103,7 @@ void RenderTextBox(Clay_String label)
             .cornerRadius = CLAY_CORNER_RADIUS(8),
             .border = {
                 .color = focused ? COLOR_BORDER_TEXTBOX_FOCUSED : COLOR_BORDER_TEXTBOX,
-                .width = CLAY_BORDER_OUTSIDE(focused ? 2 : 1),
+                .width = CLAY_BORDER_OUTSIDE(borderWidth),
             },
         })
         {
@@ -110,16 +113,33 @@ void RenderTextBox(Clay_String label)
                 textboxData.hoveringTextBox = true;
             }
 
-            Clay_String content = {
-                .isStaticallyAllocated = true,
-                .length = textboxData.textboxBuffers[index].length,
-                .chars = textboxData.textboxBuffers[index].buffer,
-            };
-            CLAY_TEXT(content, CLAY_TEXT_CONFIG({
-                                   .fontId = FONT_ID_BODY_16,
-                                   .fontSize = 16,
-                                   .textColor = COLOR_WHITE,
-                               }));
+            bool offInterval = (int)(floor((GetTime() - textboxData.focusData.focusStartTime) * 2)) % 2;
+            CLAY({
+                .border = {
+                    .color = offInterval ? COLOR_BG_TEXTBOX : COLOR_WHITE,
+                    .width = focused ? (Clay_BorderWidth){0, 0, 0, 0, 2} : (Clay_BorderWidth){0},
+                },
+            })
+            {
+                Clay_String textBeforeCursor = {
+                    .isStaticallyAllocated = true,
+                    .length = textboxData.textboxBuffers[index].cursorPosition,
+                    .chars = textboxData.textboxBuffers[index].buffer,
+                };
+                Clay_String textAfterCursor = {
+                    .isStaticallyAllocated = true,
+                    .length = textboxData.textboxBuffers[index].length - textboxData.textboxBuffers[index].cursorPosition,
+                    .chars = textboxData.textboxBuffers[index].buffer + textboxData.textboxBuffers[index].cursorPosition,
+                };
+
+                Clay_TextElementConfig *textboxTextConfig = CLAY_TEXT_CONFIG({
+                    .fontId = FONT_ID_BODY_16,
+                    .fontSize = 16,
+                    .textColor = COLOR_WHITE,
+                });
+                CLAY_TEXT(textBeforeCursor, textboxTextConfig);
+                CLAY_TEXT(textAfterCursor, textboxTextConfig);
+            }
         }
     }
 }
