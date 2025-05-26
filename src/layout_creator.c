@@ -6,6 +6,9 @@
 #define NUM_TEST 5
 #define TEXTBOX_CHARS_MAX 255
 
+// #define CLAMP(val, min, max) (val < min) ? min : (val > max) ? max \
+//                                                              : val
+
 typedef enum
 {
     FONT_ID_BODY_16,
@@ -66,6 +69,8 @@ void HandleTextboxInteraction(Clay_ElementId elementId, Clay_PointerData pointer
 
     if (pointerInfo.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
+        textboxData.textboxBuffers[index].cursorPosition = textboxData.textboxBuffers[index].length;
+
         textboxData.focusData.focusRegistered = true;
         textboxData.focusData.focusIndex = index;
         textboxData.focusData.focusStartTime = GetTime();
@@ -240,6 +245,35 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                                    .textColor = COLOR_WHITE,
                                                }));
                 }
+            }
+        }
+    }
+
+    if (textboxData.focusData.focusIndex >= 0)
+    {
+        int key;
+        while ((key = GetCharPressed()))
+        {
+            if (key >= 32 && key <= 126)
+            {
+                // printf("DEBUG: key (unicode) = %d\n", key);
+            }
+        }
+
+        while ((key = GetKeyPressed()))
+        {
+            // printf("DEBUG: key (keycode) = %d\n", key);
+            if (key == KEY_LEFT &&
+                textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition > 0)
+            {
+                textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition--;
+                textboxData.focusData.focusStartTime = GetTime();
+            }
+            if (key == KEY_RIGHT &&
+                textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition < textboxData.textboxBuffers[textboxData.focusData.focusIndex].length)
+            {
+                textboxData.textboxBuffers[textboxData.focusData.focusIndex].cursorPosition++;
+                textboxData.focusData.focusStartTime = GetTime();
             }
         }
     }
