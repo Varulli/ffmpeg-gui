@@ -258,7 +258,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         int key;
         while ((key = GetCharPressed()))
         {
-            printf("DEBUG: char = %d\n", key);
             if (key >= 32 && key <= 126 && buffer->length < TEXTBOX_CHARS_MAX)
             {
                 size_t i = ++buffer->length;
@@ -278,12 +277,35 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
             if (key == KEY_BACKSPACE && nonZeroCursorPosition)
             {
-                size_t i = buffer->cursorPosition--;
-                for (i; i <= buffer->length; i++)
+                int offset = 1;
+
+                if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) &&
+                    buffer->length > 1)
                 {
-                    buffer->chars[i - 1] = buffer->chars[i];
+                    if (buffer->chars[buffer->cursorPosition - 1] == ' ')
+                    {
+                        while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
+                               buffer->chars[buffer->cursorPosition - 1 - offset] == ' ')
+                        {
+                            offset++;
+                        }
+                    }
+                    else
+                    {
+                        while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
+                               buffer->chars[buffer->cursorPosition - 1 - offset] != ' ')
+                        {
+                            offset++;
+                        }
+                    }
                 }
-                buffer->length--;
+
+                for (size_t i = buffer->cursorPosition; i <= buffer->length; i++)
+                {
+                    buffer->chars[i - offset] = buffer->chars[i];
+                }
+                buffer->cursorPosition -= offset;
+                buffer->length -= offset;
                 textboxData.focusData.focusStartTime = GetTime();
             }
             if (key == KEY_LEFT && nonZeroCursorPosition)
@@ -306,6 +328,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 {
                     textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + 1) % textboxData.nextTextboxIndex;
                 }
+                buffer = &textboxData.textboxBuffers[textboxData.focusData.focusIndex];
                 buffer->cursorPosition = buffer->length;
                 textboxData.focusData.focusStartTime = GetTime();
             }
