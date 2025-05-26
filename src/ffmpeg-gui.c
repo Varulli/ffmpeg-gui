@@ -11,7 +11,7 @@ void HandleClayErrors(Clay_ErrorData errorData)
 Clay_RenderCommandArray CreateLayout(Clay_Context *context)
 {
     Clay_SetCurrentContext(context);
-    // Clay_SetDebugModeEnabled(true);
+    Clay_SetDebugModeEnabled(true);
     // Run once per frame
     Clay_SetLayoutDimensions((Clay_Dimensions){
         .width = GetScreenWidth(),
@@ -31,10 +31,11 @@ Clay_RenderCommandArray CreateLayout(Clay_Context *context)
 
 int main(void)
 {
-    Clay_Raylib_Initialize(500, 600, "ffmpeg GUI", FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT); // Extra parameters to this function are new since the video was published
+    Clay_Raylib_Initialize(1000, 600, "ffmpeg GUI", FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT); // Extra parameters to this function are new since the video was published
 
     Font fonts[FONT_ID_DUMMY_LAST];
     fonts[FONT_ID_BODY_16] = LoadFontEx("resources/consolas.ttf", 16, NULL, 400);
+    fonts[FONT_ID_TEST_16] = LoadFontEx("resources/ostrich-regular.ttf", 16, NULL, 400);
     SetTextureFilter(fonts[FONT_ID_BODY_16].texture, TEXTURE_FILTER_BILINEAR);
 
     uint64_t clayRequiredMemory = Clay_MinMemorySize();
