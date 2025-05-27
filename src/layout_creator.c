@@ -1,5 +1,8 @@
 #include "../inc/clay.h"
 #include "../inc/raylib.h"
+#include "../inc/nfd.h"
+#include <stdlib.h>
+#include <string.h>
 
 // #define TEXTBOX_DATA_INIT {.buffer = {0}, .cursorPosition = 0}
 
@@ -15,6 +18,14 @@ typedef enum
     FONT_ID_TEST_16,
     FONT_ID_DUMMY_LAST
 } FontID;
+
+typedef enum
+{
+    TEXTBOX_ID_INPUT_FILE,
+    TEXTBOX_ID_FILTERS,
+    TEXTBOX_ID_OUTPUT_LOCATION,
+    TEXTBOX_ID_DUMMY_LAST
+} TextboxID;
 
 const Clay_Color COLOR_BG_MAIN = {50, 50, 50, 255};
 const Clay_Color COLOR_BG_SECTION = {70, 70, 70, 255};
@@ -42,27 +53,34 @@ typedef struct
 typedef struct
 {
     TextboxBuffer *textboxBuffers;
-    size_t nextTextboxIndex;
     bool hoveringTextBox;
     FocusData focusData;
     Vector2 minDimensions;
 } TextboxData;
 
-TextboxBuffer textboxBuffers[] = {
-    {.chars = {'T', ' ', '1', '\0'}, .length = 3, .cursorPosition = 0}, // Test 1
-    {.chars = {'T', ' ', '2', '\0'}, .length = 3, .cursorPosition = 0}, // Test 2
-    {.chars = {'T', ' ', '3', '\0'}, .length = 3, .cursorPosition = 0}, // Test 3
-};
+TextboxBuffer textboxBuffers[TEXTBOX_ID_DUMMY_LAST] = {0};
 
 TextboxData textboxData = {
     .textboxBuffers = textboxBuffers,
-    .nextTextboxIndex = 0,
     .hoveringTextBox = false,
     .focusData = {
         .focusRegistered = false,
         .focusIndex = -1,
     },
 };
+
+int convert()
+{
+    char cmd[1024] = {0};
+    strcat(cmd, "ffmpeg -i ");
+    strcat(cmd, textboxData.textboxBuffers[0].chars);
+    strcat(cmd, " -vf \"");
+    strcat(cmd, textboxData.textboxBuffers[1].chars);
+    strcat(cmd, "\" ");
+    strcat(cmd, textboxData.textboxBuffers[2].chars);
+    printf("DEBUG: cmd = %s\n", cmd);
+    return system(cmd);
+}
 
 void HandleTextboxInteraction(Clay_ElementId elementId, Clay_PointerData pointerInfo, intptr_t userData)
 {
@@ -80,15 +98,23 @@ void HandleTextboxInteraction(Clay_ElementId elementId, Clay_PointerData pointer
 
 void HandleConvertButtonInteraction(Clay_ElementId elementId, Clay_PointerData pointerInfo, intptr_t userData)
 {
+    if (pointerInfo.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
+    {
+        int result = convert();
+
+        if (result)
+        {
+            printf("DEBUG: result = %d\n", result);
+        }
+    }
 }
 
-void RenderTextBox(Clay_String label)
+void RenderTextBox(Clay_String label, TextboxID textboxId)
 {
-    size_t index = textboxData.nextTextboxIndex++;
-    bool focused = (textboxData.focusData.focusIndex == index);
+    bool focused = (textboxData.focusData.focusIndex == textboxId);
 
     CLAY({
-        .id = CLAY_IDI("Textbox", index),
+        .id = CLAY_IDI("Textbox", textboxId),
         .layout = {
             .childGap = MeasureText(" ", 16),
             .childAlignment = {.y = CLAY_ALIGN_Y_CENTER},
@@ -121,7 +147,7 @@ void RenderTextBox(Clay_String label)
             },
         })
         {
-            Clay_OnHover(HandleTextboxInteraction, index);
+            Clay_OnHover(HandleTextboxInteraction, textboxId);
             if (Clay_Hovered())
             {
                 textboxData.hoveringTextBox = true;
@@ -135,27 +161,41 @@ void RenderTextBox(Clay_String label)
                 },
             })
             {
-                Clay_String textBeforeCursor = {
-                    .isStaticallyAllocated = true,
-                    .length = textboxData.textboxBuffers[index].cursorPosition,
-                    .chars = textboxData.textboxBuffers[index].chars,
-                };
-                Clay_String textAfterCursor = {
-                    .isStaticallyAllocated = true,
-                    .length = textboxData.textboxBuffers[index].length - textboxData.textboxBuffers[index].cursorPosition,
-                    .chars = textboxData.textboxBuffers[index].chars + textboxData.textboxBuffers[index].cursorPosition,
-                };
-
                 Clay_TextElementConfig *textboxTextConfig = CLAY_TEXT_CONFIG({
                     .fontId = FONT_ID_BODY_16,
                     .fontSize = 16,
                     .textColor = COLOR_WHITE,
                 });
-                CLAY_TEXT(textBeforeCursor, textboxTextConfig);
-                CLAY_TEXT(textAfterCursor, textboxTextConfig);
+                TextboxBuffer *buffer = &textboxData.textboxBuffers[textboxId];
+
+                if (buffer->length == 0)
+                {
+                    CLAY_TEXT(CLAY_STRING(""), textboxTextConfig);
+                    CLAY_TEXT(CLAY_STRING(" "), textboxTextConfig);
+                }
+                else
+                {
+                    Clay_String textBeforeCursor = {
+                        .isStaticallyAllocated = true,
+                        .length = buffer->cursorPosition,
+                        .chars = buffer->chars,
+                    };
+                    Clay_String textAfterCursor = {
+                        .isStaticallyAllocated = true,
+                        .length = buffer->length - buffer->cursorPosition,
+                        .chars = buffer->chars + buffer->cursorPosition,
+                    };
+
+                    CLAY_TEXT(textBeforeCursor, textboxTextConfig);
+                    CLAY_TEXT(textAfterCursor, textboxTextConfig);
+                }
             }
         }
     }
+}
+
+void RenderBrowseFilesButton()
+{
 }
 
 void LayoutCreator_Initialize()
@@ -168,7 +208,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
     bool leftClickPressed = IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
 
-    textboxData.nextTextboxIndex = 0;
     textboxData.hoveringTextBox = false;
     textboxData.focusData.focusRegistered = false;
 
@@ -206,9 +245,20 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                                         .textColor = COLOR_WHITE,
                                                     }));
 
-            RenderTextBox(CLAY_STRING("Test 1:"));
-            RenderTextBox(CLAY_STRING("Test 2:"));
-            RenderTextBox(CLAY_STRING("Test 3:"));
+            RenderTextBox(CLAY_STRING("Input File:"), TEXTBOX_ID_INPUT_FILE);
+            RenderTextBox(CLAY_STRING("Filters:"), TEXTBOX_ID_FILTERS);
+            RenderTextBox(CLAY_STRING("Output Location:"), TEXTBOX_ID_OUTPUT_LOCATION);
+
+            CLAY(0)
+            {
+                Clay_OnHover(HandleConvertButtonInteraction, 0);
+
+                CLAY_TEXT(CLAY_STRING("Convert"), CLAY_TEXT_CONFIG({
+                                                      .fontId = FONT_ID_BODY_16,
+                                                      .fontSize = 16,
+                                                      .textColor = COLOR_WHITE,
+                                                  }));
+            }
         }
 
         CLAY({
@@ -371,11 +421,11 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             {
                 if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))
                 {
-                    textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + textboxData.nextTextboxIndex - 1) % textboxData.nextTextboxIndex;
+                    textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + TEXTBOX_ID_DUMMY_LAST - 1) % TEXTBOX_ID_DUMMY_LAST;
                 }
                 else
                 {
-                    textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + 1) % textboxData.nextTextboxIndex;
+                    textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + 1) % TEXTBOX_ID_DUMMY_LAST;
                 }
                 buffer = &textboxData.textboxBuffers[textboxData.focusData.focusIndex];
                 buffer->cursorPosition = buffer->length;
