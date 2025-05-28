@@ -44,7 +44,7 @@ int main(void)
     Clay_Context *clayContext = Clay_Initialize(clayMemory, (Clay_Dimensions){.width = GetScreenWidth(), .height = GetScreenHeight()}, (Clay_ErrorHandler){HandleClayErrors}); // This final argument is new since the video was published
     Clay_SetMeasureTextFunction(Raylib_MeasureText, fonts);
 
-    textboxData.minDimensions = MeasureTextEx(fonts[FONT_ID_BODY_16], "12345678", 16, 0);
+    LayoutCreator_Initialize(fonts[FONT_ID_BODY_16]);
 
     while (!WindowShouldClose())
     {
@@ -54,6 +54,8 @@ int main(void)
         Clay_Raylib_Render(renderCommands, fonts);
         EndDrawing();
     }
+
+    LayoutCreator_Destroy();
 
     Clay_Raylib_Close();
 }

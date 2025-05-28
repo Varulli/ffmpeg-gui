@@ -21,20 +21,25 @@ typedef enum
 
 typedef enum
 {
-    TEXTBOX_ID_INPUT_FILE,
+    TEXTBOX_ID_INPUT_PATH,
     TEXTBOX_ID_FILTERS,
-    TEXTBOX_ID_OUTPUT_LOCATION,
+    TEXTBOX_ID_OUTPUT_PATH,
     TEXTBOX_ID_DUMMY_LAST
 } TextboxID;
 
 const Clay_Color COLOR_BG_MAIN = {50, 50, 50, 255};
 const Clay_Color COLOR_BG_SECTION = {70, 70, 70, 255};
 const Clay_Color COLOR_BG_TEXTBOX = {90, 90, 90, 255};
+const Clay_Color COLOR_BG_BUTTON = {90, 90, 90, 255};
+const Clay_Color COLOR_BG_BUTTON_HOVERED = {110, 110, 110, 255};
 const Clay_Color COLOR_BORDER_TEXTBOX = {150, 150, 150, 255};
 const Clay_Color COLOR_BORDER_TEXTBOX_FOCUSED = {200, 200, 200, 255};
+const Clay_Color COLOR_BORDER_BUTTON = {150, 150, 150, 255};
 const Clay_Color COLOR_WHITE = {255, 255, 255, 255};
 const Clay_Color COLOR_RED = {255, 0, 0, 255};
 const Clay_Color COLOR_GREEN = {0, 255, 0, 255};
+
+Clay_TextElementConfig *defaultTextConfig;
 
 typedef struct
 {
@@ -72,21 +77,22 @@ TextboxData textboxData = {
 int convert()
 {
     char cmd[1024] = {0};
-    strcat(cmd, "ffmpeg -i ");
-    strcat(cmd, textboxData.textboxBuffers[0].chars);
-    strcat(cmd, " -vf \"");
-    strcat(cmd, textboxData.textboxBuffers[1].chars);
-    strcat(cmd, "\" ");
-    strcat(cmd, textboxData.textboxBuffers[2].chars);
+    strcat(cmd, "ffmpeg -i \"");
+    strcat(cmd, textboxData.textboxBuffers[TEXTBOX_ID_INPUT_PATH].chars);
+    strcat(cmd, "\" -vf \"");
+    strcat(cmd, textboxData.textboxBuffers[TEXTBOX_ID_FILTERS].chars);
+    strcat(cmd, "\" \"");
+    strcat(cmd, textboxData.textboxBuffers[TEXTBOX_ID_OUTPUT_PATH].chars);
+    strcat(cmd, "\"");
     printf("DEBUG: cmd = %s\n", cmd);
     return system(cmd);
 }
 
-void HandleTextboxInteraction(Clay_ElementId elementId, Clay_PointerData pointerInfo, intptr_t userData)
+void HandleTextboxInteraction(Clay_ElementId elementId, Clay_PointerData pointerData, intptr_t userData)
 {
     size_t index = (size_t)userData;
 
-    if (pointerInfo.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
+    if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
         textboxData.textboxBuffers[index].cursorPosition = textboxData.textboxBuffers[index].length;
 
@@ -96,15 +102,67 @@ void HandleTextboxInteraction(Clay_ElementId elementId, Clay_PointerData pointer
     }
 }
 
-void HandleConvertButtonInteraction(Clay_ElementId elementId, Clay_PointerData pointerInfo, intptr_t userData)
+void HandleConvertButtonInteraction(Clay_ElementId elementId, Clay_PointerData pointerData, intptr_t userData)
 {
-    if (pointerInfo.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
+    if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
         int result = convert();
 
         if (result)
         {
             printf("DEBUG: result = %d\n", result);
+        }
+    }
+}
+
+void HandleBrowseButtonInteraction(Clay_ElementId elementId, Clay_PointerData pointerData, intptr_t userData)
+{
+    size_t index = (size_t)userData;
+
+    if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
+    {
+        nfdu8char_t *outPath;
+        nfdresult_t result;
+
+        switch (index)
+        {
+        case TEXTBOX_ID_INPUT_PATH:
+            nfdu8filteritem_t filters[] = {
+                {"Videos", "mp4,mov,mkv,webm,flv,mpeg"},
+                {"GIFs", "gif"},
+            };
+            nfdopendialogu8args_t openDialogArgs = {0};
+            openDialogArgs.filterList = filters;
+            openDialogArgs.filterCount = 2;
+            result = NFD_OpenDialogU8_With(&outPath, &openDialogArgs);
+            break;
+
+        case TEXTBOX_ID_OUTPUT_PATH:
+            nfdpickfolderu8args_t pickFolderArgs = {0};
+            result = NFD_PickFolderU8_With(&outPath, &pickFolderArgs);
+            break;
+
+        default:
+            printf("DEBUG: invalid index = %zu (HandleBrowseButtonInteraction)\n", index);
+            return;
+            break;
+        }
+
+        if (result == NFD_OKAY)
+        {
+            TextboxBuffer *buffer = &textboxData.textboxBuffers[index];
+            strncpy(buffer->chars, outPath, TEXTBOX_CHARS_MAX);
+            buffer->length = strlen(buffer->chars);
+            buffer->cursorPosition = buffer->length;
+            NFD_FreePathU8(outPath);
+        }
+        else if (result == NFD_CANCEL)
+        {
+            // printf("DEBUG: Browse canceled (index = %zu)\n", index);
+        }
+        else
+        {
+            printf("DEBUG: Error: %s\n", NFD_GetError());
         }
     }
 }
@@ -116,18 +174,14 @@ void RenderTextBox(Clay_String label, TextboxID textboxId)
     CLAY({
         .id = CLAY_IDI("Textbox", textboxId),
         .layout = {
-            .childGap = MeasureText(" ", 16),
+            .childGap = 8,
             .childAlignment = {.y = CLAY_ALIGN_Y_CENTER},
         },
     })
     {
         if (label.length > 0)
         {
-            CLAY_TEXT(label, CLAY_TEXT_CONFIG({
-                                 .fontId = FONT_ID_BODY_16,
-                                 .fontSize = 16,
-                                 .textColor = COLOR_WHITE,
-                             }));
+            CLAY_TEXT(label, defaultTextConfig);
         }
 
         uint16_t borderWidth = focused ? 2 : 1;
@@ -161,17 +215,12 @@ void RenderTextBox(Clay_String label, TextboxID textboxId)
                 },
             })
             {
-                Clay_TextElementConfig *textboxTextConfig = CLAY_TEXT_CONFIG({
-                    .fontId = FONT_ID_BODY_16,
-                    .fontSize = 16,
-                    .textColor = COLOR_WHITE,
-                });
                 TextboxBuffer *buffer = &textboxData.textboxBuffers[textboxId];
 
                 if (buffer->length == 0)
                 {
-                    CLAY_TEXT(CLAY_STRING(""), textboxTextConfig);
-                    CLAY_TEXT(CLAY_STRING(" "), textboxTextConfig);
+                    CLAY_TEXT(CLAY_STRING(""), defaultTextConfig);
+                    CLAY_TEXT(CLAY_STRING(" "), defaultTextConfig);
                 }
                 else
                 {
@@ -186,20 +235,50 @@ void RenderTextBox(Clay_String label, TextboxID textboxId)
                         .chars = buffer->chars + buffer->cursorPosition,
                     };
 
-                    CLAY_TEXT(textBeforeCursor, textboxTextConfig);
-                    CLAY_TEXT(textAfterCursor, textboxTextConfig);
+                    CLAY_TEXT(textBeforeCursor, defaultTextConfig);
+                    CLAY_TEXT(textAfterCursor, defaultTextConfig);
                 }
             }
         }
     }
 }
 
-void RenderBrowseFilesButton()
+void RenderBrowseButton(TextboxID textboxId)
 {
+    CLAY({
+        .layout = {
+            .padding = {8, 8, 4, 4},
+        },
+        .backgroundColor = Clay_Hovered() ? COLOR_BG_BUTTON_HOVERED : COLOR_BG_BUTTON,
+        .cornerRadius = CLAY_CORNER_RADIUS(8),
+        .border = {
+            .color = COLOR_BORDER_BUTTON,
+            .width = CLAY_BORDER_OUTSIDE(1),
+        },
+    })
+    {
+        Clay_OnHover(HandleBrowseButtonInteraction, textboxId);
+
+        CLAY_TEXT(CLAY_STRING("..."), defaultTextConfig);
+    }
 }
 
-void LayoutCreator_Initialize()
+void LayoutCreator_Initialize(Font defaultFont)
 {
+    defaultTextConfig = CLAY_TEXT_CONFIG({
+        .fontId = FONT_ID_BODY_16,
+        .fontSize = 16,
+        .textColor = {255, 255, 255, 255},
+    });
+
+    textboxData.minDimensions = MeasureTextEx(defaultFont, "12345678", 16, 0);
+
+    NFD_Init();
+}
+
+void LayoutCreator_Destroy()
+{
+    NFD_Quit();
 }
 
 Clay_RenderCommandArray LayoutCreator_CreateLayout()
@@ -239,25 +318,27 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             },
         })
         {
-            CLAY_TEXT(CLAY_STRING("Select File: "), CLAY_TEXT_CONFIG({
-                                                        .fontId = FONT_ID_BODY_16,
-                                                        .fontSize = 16,
-                                                        .textColor = COLOR_WHITE,
-                                                    }));
+            CLAY_TEXT(CLAY_STRING("Select File: "), defaultTextConfig);
 
-            RenderTextBox(CLAY_STRING("Input File:"), TEXTBOX_ID_INPUT_FILE);
+            CLAY({.layout = {.childGap = 4}})
+            {
+                RenderTextBox(CLAY_STRING("Input File:"), TEXTBOX_ID_INPUT_PATH);
+                RenderBrowseButton(TEXTBOX_ID_INPUT_PATH);
+            }
+
             RenderTextBox(CLAY_STRING("Filters:"), TEXTBOX_ID_FILTERS);
-            RenderTextBox(CLAY_STRING("Output Location:"), TEXTBOX_ID_OUTPUT_LOCATION);
+
+            CLAY({.layout = {.childGap = 4}})
+            {
+                RenderTextBox(CLAY_STRING("Output Folder:"), TEXTBOX_ID_OUTPUT_PATH);
+                RenderBrowseButton(TEXTBOX_ID_OUTPUT_PATH);
+            }
 
             CLAY(0)
             {
                 Clay_OnHover(HandleConvertButtonInteraction, 0);
 
-                CLAY_TEXT(CLAY_STRING("Convert"), CLAY_TEXT_CONFIG({
-                                                      .fontId = FONT_ID_BODY_16,
-                                                      .fontSize = 16,
-                                                      .textColor = COLOR_WHITE,
-                                                  }));
+                CLAY_TEXT(CLAY_STRING("Convert"), defaultTextConfig);
             }
         }
 
@@ -277,11 +358,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             },
         })
         {
-            CLAY_TEXT(CLAY_STRING("Preview"), CLAY_TEXT_CONFIG({
-                                                  .fontId = FONT_ID_BODY_16,
-                                                  .fontSize = 16,
-                                                  .textColor = COLOR_WHITE,
-                                              }));
+            CLAY_TEXT(CLAY_STRING("Preview"), defaultTextConfig);
 
             for (size_t i = 0; i < NUM_TEST; i++)
             {
@@ -298,11 +375,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     {
                         textboxData.hoveringTextBox = true;
                     }
-                    CLAY_TEXT(CLAY_STRING(""), CLAY_TEXT_CONFIG({
-                                                   .fontId = FONT_ID_BODY_16,
-                                                   .fontSize = 16,
-                                                   .textColor = COLOR_WHITE,
-                                               }));
+                    CLAY_TEXT(CLAY_STRING(""), defaultTextConfig);
                 }
             }
         }

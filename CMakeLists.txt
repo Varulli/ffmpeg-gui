@@ -16,17 +16,24 @@ FetchContent_Declare(
     GIT_PROGRESS TRUE
     GIT_SHALLOW TRUE
 )
+FetchContent_Declare(nfd
+    GIT_REPOSITORY "https://github.com/btzy/nativefiledialog-extended.git"
+    GIT_TAG "v1.2.1"
+    GIT_PROGRESS TRUE
+    GIT_SHALLOW TRUE
+)
     
-FetchContent_MakeAvailable(raylib)
+FetchContent_MakeAvailable(raylib nfd)
 
 file(GLOB SOURCES "src/${PROJECT_NAME}.c")
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 
-# target_compile_options(${PROJECT_NAME} PUBLIC)
-# target_include_directories(${PROJECT_NAME} PUBLIC .)
-
-target_link_libraries(${PROJECT_NAME} PRIVATE raylib)
+target_link_libraries(
+    ${PROJECT_NAME}
+    PRIVATE raylib
+    PRIVATE nfd    
+)
 
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
