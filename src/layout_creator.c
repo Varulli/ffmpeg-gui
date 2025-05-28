@@ -451,12 +451,9 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                             buffer->cursorPosition--;
                         }
                     }
-                    else
+                    while (buffer->cursorPosition > 0 && buffer->chars[buffer->cursorPosition - 1] != ' ')
                     {
-                        while (buffer->cursorPosition > 0 && buffer->chars[buffer->cursorPosition - 1] != ' ')
-                        {
-                            buffer->cursorPosition--;
-                        }
+                        buffer->cursorPosition--;
                     }
                 }
                 else
@@ -476,12 +473,9 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                             buffer->cursorPosition++;
                         }
                     }
-                    else
+                    while (buffer->cursorPosition < buffer->length && buffer->chars[buffer->cursorPosition] != ' ')
                     {
-                        while (buffer->cursorPosition < buffer->length && buffer->chars[buffer->cursorPosition] != ' ')
-                        {
-                            buffer->cursorPosition++;
-                        }
+                        buffer->cursorPosition++;
                     }
                 }
                 else
