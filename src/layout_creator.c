@@ -281,6 +281,18 @@ void LayoutCreator_Destroy()
     NFD_Quit();
 }
 
+bool charMatchesAny(char c, const char *matchString)
+{
+    for (size_t i = 0; matchString[i] != '\0'; i++)
+    {
+        if (c == matchString[i])
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 Clay_RenderCommandArray LayoutCreator_CreateLayout()
 {
     Clay_BeginLayout();
@@ -409,27 +421,24 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
             if (key == KEY_BACKSPACE && nonZeroCursorPosition)
             {
-                int offset = 1;
+                int offset = 0;
 
-                if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) &&
-                    buffer->length > 1)
+                if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
                 {
-                    if (buffer->chars[buffer->cursorPosition - 1] == ' ')
+                    while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
+                           buffer->chars[buffer->cursorPosition - 1 - offset] == ' ')
                     {
-                        while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
-                               buffer->chars[buffer->cursorPosition - 1 - offset] == ' ')
-                        {
-                            offset++;
-                        }
+                        offset++;
                     }
-                    else
+                    while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
+                           buffer->chars[buffer->cursorPosition - 1 - offset] != ' ')
                     {
-                        while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
-                               buffer->chars[buffer->cursorPosition - 1 - offset] != ' ')
-                        {
-                            offset++;
-                        }
+                        offset++;
                     }
+                }
+                else
+                {
+                    offset = 1;
                 }
 
                 for (size_t i = buffer->cursorPosition; i <= buffer->length; i++)
@@ -444,12 +453,9 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             {
                 if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
                 {
-                    if (buffer->chars[buffer->cursorPosition - 1] == ' ')
+                    while (buffer->cursorPosition > 0 && buffer->chars[buffer->cursorPosition - 1] == ' ')
                     {
-                        while (buffer->cursorPosition > 0 && buffer->chars[buffer->cursorPosition - 1] == ' ')
-                        {
-                            buffer->cursorPosition--;
-                        }
+                        buffer->cursorPosition--;
                     }
                     while (buffer->cursorPosition > 0 && buffer->chars[buffer->cursorPosition - 1] != ' ')
                     {
@@ -466,12 +472,9 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             {
                 if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
                 {
-                    if (buffer->chars[buffer->cursorPosition] == ' ')
+                    while (buffer->cursorPosition < buffer->length && buffer->chars[buffer->cursorPosition] == ' ')
                     {
-                        while (buffer->cursorPosition < buffer->length && buffer->chars[buffer->cursorPosition] == ' ')
-                        {
-                            buffer->cursorPosition++;
-                        }
+                        buffer->cursorPosition++;
                     }
                     while (buffer->cursorPosition < buffer->length && buffer->chars[buffer->cursorPosition] != ' ')
                     {
