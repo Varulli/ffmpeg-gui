@@ -27,6 +27,12 @@ typedef enum
     TEXTBOX_ID_DUMMY_LAST
 } TextboxID;
 
+typedef enum
+{
+    DROPDOWN_ID_TEST,
+    DROPDOWN_ID_DUMMY_LAST
+} DropdownID;
+
 const Clay_Color COLOR_BG_MAIN = {50, 50, 50, 255};
 const Clay_Color COLOR_BG_SECTION = {70, 70, 70, 255};
 const Clay_Color COLOR_BG_TEXTBOX = {90, 90, 90, 255};
@@ -38,8 +44,6 @@ const Clay_Color COLOR_BORDER_BUTTON = {150, 150, 150, 255};
 const Clay_Color COLOR_WHITE = {255, 255, 255, 255};
 const Clay_Color COLOR_RED = {255, 0, 0, 255};
 const Clay_Color COLOR_GREEN = {0, 255, 0, 255};
-
-Clay_TextElementConfig *defaultTextConfig;
 
 typedef struct
 {
@@ -58,22 +62,46 @@ typedef struct
 typedef struct
 {
     TextboxBuffer *textboxBuffers;
-    bool hoveringTextBox;
+    bool hoveringTextbox;
     FocusData focusData;
     Vector2 minDimensions;
 } TextboxData;
+
+typedef struct
+{
+    const char *label;
+    const char *value;
+} DropdownOption;
+
+typedef struct
+{
+    DropdownOption *options;
+    size_t length;
+} DropdownOptionArray;
+
+typedef struct
+{
+    size_t *selectedOptions;
+} DropdownData;
 
 TextboxBuffer textboxBuffers[TEXTBOX_ID_DUMMY_LAST] = {0};
 
 TextboxData textboxData = {
     .textboxBuffers = textboxBuffers,
-    .hoveringTextBox = false,
+    .hoveringTextbox = false,
     .focusData = {
         .focusRegistered = false,
         .focusIndex = -1,
     },
 };
 
+size_t selectedOptions[DROPDOWN_ID_DUMMY_LAST] = {0};
+
+DropdownData dropdownData = {
+    .selectedOptions = selectedOptions,
+};
+
+Clay_TextElementConfig *defaultTextConfig;
 Clay_Padding defaultBoxPadding;
 
 int convert()
@@ -169,7 +197,15 @@ void HandleBrowseButtonInteraction(Clay_ElementId elementId, Clay_PointerData po
     }
 }
 
-void RenderTextBox(Clay_String label, TextboxID textboxId, size_t maxCharsDisplayed)
+void HandleDropdownOptionInteraction(Clay_ElementId elementId, Clay_PointerData pointerData, intptr_t userData)
+{
+}
+
+void HandleDropdownInteraction(Clay_ElementId elementId, Clay_PointerData pointerData, intptr_t userData)
+{
+}
+
+void RenderTextbox(Clay_String label, TextboxID textboxId, size_t maxCharsDisplayed)
 {
     bool focused = (textboxData.focusData.focusIndex == textboxId);
 
@@ -205,7 +241,7 @@ void RenderTextBox(Clay_String label, TextboxID textboxId, size_t maxCharsDispla
             Clay_OnHover(HandleTextboxInteraction, textboxId);
             if (Clay_Hovered())
             {
-                textboxData.hoveringTextBox = true;
+                textboxData.hoveringTextbox = true;
             }
 
             bool offInterval = (int)(floor((GetTime() - textboxData.focusData.focusStartTime) * 2)) % 2;
@@ -280,6 +316,10 @@ void RenderBrowseButton(TextboxID textboxId)
     }
 }
 
+void RenderDropdown(DropdownOption *options)
+{
+}
+
 void LayoutCreator_Initialize(Font defaultFont)
 {
     defaultTextConfig = CLAY_TEXT_CONFIG({
@@ -323,7 +363,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
     bool leftClickPressed = IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
 
-    textboxData.hoveringTextBox = false;
+    textboxData.hoveringTextbox = false;
     textboxData.focusData.focusRegistered = false;
 
     CLAY({
@@ -358,15 +398,15 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
             CLAY({.layout = {.childGap = 4}})
             {
-                RenderTextBox(CLAY_STRING("Input File:"), TEXTBOX_ID_INPUT_PATH, 30);
+                RenderTextbox(CLAY_STRING("Input File:"), TEXTBOX_ID_INPUT_PATH, 30);
                 RenderBrowseButton(TEXTBOX_ID_INPUT_PATH);
             }
 
-            RenderTextBox(CLAY_STRING("Filters:"), TEXTBOX_ID_FILTERS, 33);
+            RenderTextbox(CLAY_STRING("Filters:"), TEXTBOX_ID_FILTERS, 33);
 
             CLAY({.layout = {.childGap = 4}})
             {
-                RenderTextBox(CLAY_STRING("Output Folder:"), TEXTBOX_ID_OUTPUT_PATH, 27);
+                RenderTextbox(CLAY_STRING("Output Folder:"), TEXTBOX_ID_OUTPUT_PATH, 27);
                 RenderBrowseButton(TEXTBOX_ID_OUTPUT_PATH);
             }
 
@@ -409,7 +449,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     Clay_OnHover(HandleTextboxInteraction, i);
                     if (Clay_Hovered())
                     {
-                        textboxData.hoveringTextBox = true;
+                        textboxData.hoveringTextbox = true;
                     }
                     CLAY_TEXT(CLAY_STRING(""), defaultTextConfig);
                 }
@@ -580,7 +620,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         textboxData.focusData.focusIndex = -1;
     }
 
-    SetMouseCursor(textboxData.hoveringTextBox ? MOUSE_CURSOR_IBEAM : MOUSE_CURSOR_DEFAULT);
+    SetMouseCursor(textboxData.hoveringTextbox ? MOUSE_CURSOR_IBEAM : MOUSE_CURSOR_DEFAULT);
 
     return Clay_EndLayout();
 }
