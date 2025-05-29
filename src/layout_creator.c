@@ -450,12 +450,12 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
                 {
                     while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
-                           buffer->chars[buffer->cursorPosition - 1 - offset] == ' ')
+                           charMatchesAny(buffer->chars[buffer->cursorPosition - 1 - offset], " ./\\"))
                     {
                         offset++;
                     }
                     while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
-                           buffer->chars[buffer->cursorPosition - 1 - offset] != ' ')
+                           !charMatchesAny(buffer->chars[buffer->cursorPosition - 1 - offset], " ./\\"))
                     {
                         offset++;
                     }
@@ -480,12 +480,12 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
                 {
                     while ((int)buffer->cursorPosition + offset < buffer->length &&
-                           buffer->chars[buffer->cursorPosition + offset] == ' ')
+                           charMatchesAny(buffer->chars[buffer->cursorPosition + offset], " ./\\"))
                     {
                         offset++;
                     }
                     while ((int)buffer->cursorPosition + offset < buffer->length &&
-                           buffer->chars[buffer->cursorPosition + offset] != ' ')
+                           !charMatchesAny(buffer->chars[buffer->cursorPosition + offset], " ./\\"))
                     {
                         offset++;
                     }
@@ -506,11 +506,13 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             {
                 if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
                 {
-                    while (buffer->cursorPosition > 0 && buffer->chars[buffer->cursorPosition - 1] == ' ')
+                    while (buffer->cursorPosition > 0 &&
+                           charMatchesAny(buffer->chars[buffer->cursorPosition - 1], " ./\\"))
                     {
                         buffer->cursorPosition--;
                     }
-                    while (buffer->cursorPosition > 0 && buffer->chars[buffer->cursorPosition - 1] != ' ')
+                    while (buffer->cursorPosition > 0 &&
+                           !charMatchesAny(buffer->chars[buffer->cursorPosition - 1], " ./\\"))
                     {
                         buffer->cursorPosition--;
                     }
@@ -525,11 +527,13 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             {
                 if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
                 {
-                    while (buffer->cursorPosition < buffer->length && buffer->chars[buffer->cursorPosition] == ' ')
+                    while (buffer->cursorPosition < buffer->length &&
+                           charMatchesAny(buffer->chars[buffer->cursorPosition], " ./\\"))
                     {
                         buffer->cursorPosition++;
                     }
-                    while (buffer->cursorPosition < buffer->length && buffer->chars[buffer->cursorPosition] != ' ')
+                    while (buffer->cursorPosition < buffer->length &&
+                           !charMatchesAny(buffer->chars[buffer->cursorPosition], " ./\\"))
                     {
                         buffer->cursorPosition++;
                     }
