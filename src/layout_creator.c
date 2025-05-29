@@ -74,6 +74,8 @@ TextboxData textboxData = {
     },
 };
 
+Clay_Padding defaultBoxPadding;
+
 int convert()
 {
     char cmd[1024] = {0};
@@ -167,14 +169,14 @@ void HandleBrowseButtonInteraction(Clay_ElementId elementId, Clay_PointerData po
     }
 }
 
-void RenderTextBox(Clay_String label, TextboxID textboxId)
+void RenderTextBox(Clay_String label, TextboxID textboxId, size_t maxCharsDisplayed)
 {
     bool focused = (textboxData.focusData.focusIndex == textboxId);
 
     CLAY({
         .id = CLAY_IDI("Textbox", textboxId),
         .layout = {
-            .childGap = 8,
+            .childGap = textboxData.minDimensions.x,
             .childAlignment = {.y = CLAY_ALIGN_Y_CENTER},
         },
     })
@@ -188,10 +190,9 @@ void RenderTextBox(Clay_String label, TextboxID textboxId)
         CLAY({
             .layout = {
                 .sizing = {
-                    .width = {.size = {.minMax = {.min = textboxData.minDimensions.x}}},
-                    .height = {.size = {.minMax = {.min = textboxData.minDimensions.y + 8}}},
+                    .width = {.size = {.minMax = {.min = textboxData.minDimensions.x * (maxCharsDisplayed + 2)}}},
                 },
-                .padding = {8, 8, 4, 4},
+                .padding = defaultBoxPadding,
             },
             .backgroundColor = COLOR_BG_TEXTBOX,
             .cornerRadius = CLAY_CORNER_RADIUS(8),
@@ -224,14 +225,30 @@ void RenderTextBox(Clay_String label, TextboxID textboxId)
                 }
                 else
                 {
+                    size_t displayStart = 0;
+                    size_t displayEnd = buffer->length;
+
+                    if (buffer->length > maxCharsDisplayed)
+                    {
+                        if (buffer->cursorPosition < buffer->length - maxCharsDisplayed)
+                        {
+                            displayStart = buffer->cursorPosition;
+                        }
+                        else
+                        {
+                            displayStart = buffer->length - maxCharsDisplayed;
+                        }
+                        displayEnd = displayStart + maxCharsDisplayed;
+                    }
+
                     Clay_String textBeforeCursor = {
                         .isStaticallyAllocated = true,
-                        .length = buffer->cursorPosition,
-                        .chars = buffer->chars,
+                        .length = buffer->cursorPosition - displayStart,
+                        .chars = buffer->chars + displayStart,
                     };
                     Clay_String textAfterCursor = {
                         .isStaticallyAllocated = true,
-                        .length = buffer->length - buffer->cursorPosition,
+                        .length = displayEnd - buffer->cursorPosition,
                         .chars = buffer->chars + buffer->cursorPosition,
                     };
 
@@ -247,7 +264,7 @@ void RenderBrowseButton(TextboxID textboxId)
 {
     CLAY({
         .layout = {
-            .padding = {8, 8, 4, 4},
+            .padding = defaultBoxPadding,
         },
         .backgroundColor = Clay_Hovered() ? COLOR_BG_BUTTON_HOVERED : COLOR_BG_BUTTON,
         .cornerRadius = CLAY_CORNER_RADIUS(8),
@@ -271,7 +288,14 @@ void LayoutCreator_Initialize(Font defaultFont)
         .textColor = {255, 255, 255, 255},
     });
 
-    textboxData.minDimensions = MeasureTextEx(defaultFont, "12345678", 16, 0);
+    textboxData.minDimensions = MeasureTextEx(defaultFont, "1", 16, 0);
+
+    defaultBoxPadding = (Clay_Padding){
+        textboxData.minDimensions.x,
+        textboxData.minDimensions.x,
+        textboxData.minDimensions.y / 4,
+        textboxData.minDimensions.y / 4,
+    };
 
     NFD_Init();
 }
@@ -334,15 +358,15 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
             CLAY({.layout = {.childGap = 4}})
             {
-                RenderTextBox(CLAY_STRING("Input File:"), TEXTBOX_ID_INPUT_PATH);
+                RenderTextBox(CLAY_STRING("Input File:"), TEXTBOX_ID_INPUT_PATH, 30);
                 RenderBrowseButton(TEXTBOX_ID_INPUT_PATH);
             }
 
-            RenderTextBox(CLAY_STRING("Filters:"), TEXTBOX_ID_FILTERS);
+            RenderTextBox(CLAY_STRING("Filters:"), TEXTBOX_ID_FILTERS, 33);
 
             CLAY({.layout = {.childGap = 4}})
             {
-                RenderTextBox(CLAY_STRING("Output Folder:"), TEXTBOX_ID_OUTPUT_PATH);
+                RenderTextBox(CLAY_STRING("Output Folder:"), TEXTBOX_ID_OUTPUT_PATH, 27);
                 RenderBrowseButton(TEXTBOX_ID_OUTPUT_PATH);
             }
 
@@ -446,6 +470,35 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     buffer->chars[i - offset] = buffer->chars[i];
                 }
                 buffer->cursorPosition -= offset;
+                buffer->length -= offset;
+                textboxData.focusData.focusStartTime = GetTime();
+            }
+            if (key == KEY_DELETE && nonMaxCursorPosition)
+            {
+                int offset = 0;
+
+                if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
+                {
+                    while ((int)buffer->cursorPosition + offset < buffer->length &&
+                           buffer->chars[buffer->cursorPosition + offset] == ' ')
+                    {
+                        offset++;
+                    }
+                    while ((int)buffer->cursorPosition + offset < buffer->length &&
+                           buffer->chars[buffer->cursorPosition + offset] != ' ')
+                    {
+                        offset++;
+                    }
+                }
+                else
+                {
+                    offset = 1;
+                }
+
+                for (size_t i = buffer->cursorPosition; i <= buffer->length - offset; i++)
+                {
+                    buffer->chars[i] = buffer->chars[i + offset];
+                }
                 buffer->length -= offset;
                 textboxData.focusData.focusStartTime = GetTime();
             }
