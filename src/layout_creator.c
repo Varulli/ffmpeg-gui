@@ -4,7 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-// #define TEXTBOX_DATA_INIT {.buffer = {0}, .cursorPosition = 0}
+#define DROPDOWN_OPTION_NULL {CLAY_STRING(""), NULL}
+#define DROPDOWN_OPTION_UNSELECTED {CLAY_STRING("-- None --"), ""}
 
 #define NUM_TEST 5
 #define TEXTBOX_CHARS_MAX 255
@@ -37,10 +38,13 @@ const Clay_Color COLOR_BG_MAIN = {50, 50, 50, 255};
 const Clay_Color COLOR_BG_SECTION = {70, 70, 70, 255};
 const Clay_Color COLOR_BG_TEXTBOX = {90, 90, 90, 255};
 const Clay_Color COLOR_BG_BUTTON = {90, 90, 90, 255};
+const Clay_Color COLOR_BG_DROPDOWN = {90, 90, 90, 255};
 const Clay_Color COLOR_BG_BUTTON_HOVERED = {110, 110, 110, 255};
+const Clay_Color COLOR_BG_DROPDOWN_HOVERED = {110, 110, 110, 255};
 const Clay_Color COLOR_BORDER_TEXTBOX = {150, 150, 150, 255};
 const Clay_Color COLOR_BORDER_TEXTBOX_FOCUSED = {200, 200, 200, 255};
 const Clay_Color COLOR_BORDER_BUTTON = {150, 150, 150, 255};
+const Clay_Color COLOR_BORDER_DROPDOWN = {150, 150, 150, 255};
 const Clay_Color COLOR_WHITE = {255, 255, 255, 255};
 const Clay_Color COLOR_RED = {255, 0, 0, 255};
 const Clay_Color COLOR_GREEN = {0, 255, 0, 255};
@@ -69,19 +73,16 @@ typedef struct
 
 typedef struct
 {
-    const char *label;
+    Clay_String label;
     const char *value;
 } DropdownOption;
 
 typedef struct
 {
-    DropdownOption *options;
-    size_t length;
-} DropdownOptionArray;
-
-typedef struct
-{
     size_t *selectedOptions;
+    const char **selectedValues;
+    size_t hoveredOption;
+    const char *hoveredValue;
 } DropdownData;
 
 TextboxBuffer textboxBuffers[TEXTBOX_ID_DUMMY_LAST] = {0};
@@ -96,13 +97,20 @@ TextboxData textboxData = {
 };
 
 size_t selectedOptions[DROPDOWN_ID_DUMMY_LAST] = {0};
+const char *selectedValues[DROPDOWN_ID_DUMMY_LAST] = {0};
 
 DropdownData dropdownData = {
     .selectedOptions = selectedOptions,
+    .selectedValues = selectedValues,
+    .hoveredOption = 0,
+    .hoveredValue = NULL,
 };
 
 Clay_TextElementConfig *defaultTextConfig;
 Clay_Padding defaultBoxPadding;
+Clay_CornerRadius defaultCornerRadius;
+
+// bool once = true;
 
 int convert()
 {
@@ -115,15 +123,16 @@ int convert()
     strcat(cmd, textboxData.textboxBuffers[TEXTBOX_ID_OUTPUT_PATH].chars);
     strcat(cmd, "\"");
     printf("DEBUG: cmd = %s\n", cmd);
+    printf("DEBUG: dropdown (test) = %s\n", dropdownData.selectedValues[DROPDOWN_ID_TEST]);
     return system(cmd);
 }
 
 void HandleTextboxInteraction(Clay_ElementId elementId, Clay_PointerData pointerData, intptr_t userData)
 {
-    size_t index = (size_t)userData;
-
     if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
+        size_t index = (size_t)userData;
+
         textboxData.textboxBuffers[index].cursorPosition = textboxData.textboxBuffers[index].length;
 
         textboxData.focusData.focusRegistered = true;
@@ -147,10 +156,10 @@ void HandleConvertButtonInteraction(Clay_ElementId elementId, Clay_PointerData p
 
 void HandleBrowseButtonInteraction(Clay_ElementId elementId, Clay_PointerData pointerData, intptr_t userData)
 {
-    size_t index = (size_t)userData;
-
     if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
+        size_t index = (size_t)userData;
+
         nfdu8char_t *outPath;
         nfdresult_t result;
 
@@ -199,10 +208,13 @@ void HandleBrowseButtonInteraction(Clay_ElementId elementId, Clay_PointerData po
 
 void HandleDropdownOptionInteraction(Clay_ElementId elementId, Clay_PointerData pointerData, intptr_t userData)
 {
-}
+    if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
+    {
+        size_t index = (size_t)userData;
 
-void HandleDropdownInteraction(Clay_ElementId elementId, Clay_PointerData pointerData, intptr_t userData)
-{
+        dropdownData.selectedOptions[index] = dropdownData.hoveredOption;
+        dropdownData.selectedValues[index] = dropdownData.hoveredValue;
+    }
 }
 
 void RenderTextbox(Clay_String label, TextboxID textboxId, size_t maxCharsDisplayed)
@@ -316,8 +328,131 @@ void RenderBrowseButton(TextboxID textboxId)
     }
 }
 
-void RenderDropdown(DropdownOption *options)
+void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *options)
 {
+    bool dropdownHovered = Clay_PointerOver(CLAY_IDI("DropdownButton", dropdownId)) ||
+                           Clay_PointerOver(CLAY_IDI("DropdownOptions", dropdownId));
+
+    size_t maxLength = 0;
+    for (size_t i = 0; options[i].value != NULL; i++)
+    {
+        if (options[i].label.length > maxLength)
+        {
+            maxLength = options[i].label.length;
+        }
+    }
+
+    CLAY({
+        .id = CLAY_IDI("Dropdown", dropdownId),
+        .layout = {
+            .childGap = textboxData.minDimensions.x,
+            .childAlignment = {.y = CLAY_ALIGN_Y_CENTER},
+        },
+    })
+    {
+        if (label.length > 0)
+        {
+            CLAY_TEXT(label, defaultTextConfig);
+        }
+
+        Clay_CornerRadius buttonCornerRadius;
+        Clay_BorderWidth buttonBorderWidth;
+        if (dropdownHovered)
+        {
+            buttonCornerRadius = (Clay_CornerRadius){8, 8, 0, 0};
+            buttonBorderWidth = (Clay_BorderWidth){1, 1, 1, 0, 0};
+        }
+        else
+        {
+            buttonCornerRadius = CLAY_CORNER_RADIUS(8);
+            buttonBorderWidth = (Clay_BorderWidth)CLAY_BORDER_OUTSIDE(1);
+        }
+
+        CLAY({
+            .layout = {
+                .sizing = {
+                    .width = {
+                        .size = {.minMax = {.min = textboxData.minDimensions.x * (maxLength + 2)}},
+                        .type = CLAY__SIZING_TYPE_FIXED,
+                    },
+                },
+            },
+            .backgroundColor = COLOR_BG_DROPDOWN,
+            .cornerRadius = buttonCornerRadius,
+            .border = {
+                .color = COLOR_BORDER_DROPDOWN,
+                .width = buttonBorderWidth,
+            },
+        })
+        {
+            CLAY({
+                .id = CLAY_IDI("DropdownButton", dropdownId),
+                .layout = {
+                    .sizing = CLAY_SIZING_GROW(0),
+                    .padding = defaultBoxPadding,
+                    .childAlignment = {.x = CLAY_ALIGN_X_CENTER},
+                },
+            })
+            {
+                CLAY_TEXT(options[dropdownData.selectedOptions[dropdownId]].label, defaultTextConfig);
+            }
+
+            if (dropdownHovered)
+            {
+                CLAY({
+                    .id = CLAY_IDI("DropdownOptions", dropdownId),
+                    .layout = {
+                        .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                    },
+                    .cornerRadius = (Clay_CornerRadius){0, 0, 8, 8},
+                    .border = {
+                        .color = COLOR_BORDER_DROPDOWN,
+                        .width = CLAY_BORDER_ALL(1),
+                    },
+                    .floating = {
+                        .attachPoints = {
+                            .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM,
+                        },
+                        .attachTo = CLAY_ATTACH_TO_PARENT,
+                    },
+                })
+                {
+                    for (size_t i = 0; options[i].value != NULL; i++)
+                    {
+                        if (i != dropdownData.selectedOptions[dropdownId])
+                        {
+                            bool hovered;
+
+                            CLAY({
+                                .layout = {
+                                    .sizing = {
+                                        .width = {
+                                            .size = {.minMax = {.min = textboxData.minDimensions.x * (maxLength + 2)}},
+                                            .type = CLAY__SIZING_TYPE_FIXED,
+                                        },
+                                    },
+                                    .padding = defaultBoxPadding,
+                                    .childAlignment = {.x = CLAY_ALIGN_X_CENTER},
+                                },
+                                .backgroundColor = (hovered = Clay_Hovered()) ? COLOR_BG_DROPDOWN_HOVERED : COLOR_BG_DROPDOWN,
+                            })
+                            {
+                                if (hovered)
+                                {
+                                    dropdownData.hoveredOption = i;
+                                    dropdownData.hoveredValue = options[i].value;
+                                }
+
+                                Clay_OnHover(HandleDropdownOptionInteraction, dropdownId);
+
+                                CLAY_TEXT(options[i].label, defaultTextConfig);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 void LayoutCreator_Initialize(Font defaultFont)
@@ -336,6 +471,8 @@ void LayoutCreator_Initialize(Font defaultFont)
         textboxData.minDimensions.y / 4,
         textboxData.minDimensions.y / 4,
     };
+
+    defaultCornerRadius = CLAY_CORNER_RADIUS(textboxData.minDimensions.x / 2);
 
     NFD_Init();
 }
@@ -402,7 +539,13 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 RenderBrowseButton(TEXTBOX_ID_INPUT_PATH);
             }
 
-            RenderTextbox(CLAY_STRING("Filters:"), TEXTBOX_ID_FILTERS, 33);
+            RenderDropdown(CLAY_STRING("Filters:"), DROPDOWN_ID_TEST, (DropdownOption[]){
+                                                                          DROPDOWN_OPTION_UNSELECTED,
+                                                                          {CLAY_STRING("Option 1"), "Option 1"},
+                                                                          {CLAY_STRING("Option 2 blah"), "Option 2"},
+                                                                          {CLAY_STRING("Option 3 yo"), "Option 3"},
+                                                                          DROPDOWN_OPTION_NULL,
+                                                                      });
 
             CLAY({.layout = {.childGap = 4}})
             {
