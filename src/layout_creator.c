@@ -3,15 +3,28 @@
 #include "../inc/nfd.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <float.h>
 
 #define DROPDOWN_OPTION_NULL {CLAY_STRING(""), NULL}
 #define DROPDOWN_OPTION_UNSELECTED {CLAY_STRING("-- None --"), ""}
 
-#define NUM_TEST 5
+#define TEXT_CONFIG_DEFAULT CLAY_TEXT_CONFIG({ \
+    .fontId = FONT_ID_BODY_16,                 \
+    .fontSize = 16,                            \
+    .textColor = COLOR_WHITE,                  \
+})
+#define TEXT_CONFIG_FAINT CLAY_TEXT_CONFIG({ \
+    .fontId = FONT_ID_BODY_16,               \
+    .fontSize = 16,                          \
+    .textColor = COLOR_LIGHTGRAY,            \
+})
+
+// #define NUM_TEST 5
 #define TEXTBOX_CHARS_MAX 255
 
-// #define CLAMP(val, min, max) (val < min) ? min : (val > max) ? max \
-//                                                              : val
+#define CLAMP(val, min, max) (val < min) ? min : (val > max) ? max \
+                                                             : val
 
 typedef enum
 {
@@ -23,7 +36,9 @@ typedef enum
 typedef enum
 {
     TEXTBOX_ID_INPUT_PATH,
-    TEXTBOX_ID_FILTERS,
+    TEXTBOX_ID_FILTER_FPS,
+    TEXTBOX_ID_DURATION_START,
+    TEXTBOX_ID_DURATION_END,
     TEXTBOX_ID_OUTPUT_PATH,
     TEXTBOX_ID_DUMMY_LAST
 } TextboxID;
@@ -37,6 +52,7 @@ typedef enum
 const Clay_Color COLOR_BG_MAIN = {50, 50, 50, 255};
 const Clay_Color COLOR_BG_SECTION = {70, 70, 70, 255};
 const Clay_Color COLOR_BG_TEXTBOX = {90, 90, 90, 255};
+const Clay_Color COLOR_BG_TEXTBOX_DISABLED = {70, 70, 70, 255};
 const Clay_Color COLOR_BG_BUTTON = {90, 90, 90, 255};
 const Clay_Color COLOR_BG_DROPDOWN = {90, 90, 90, 255};
 const Clay_Color COLOR_BG_BUTTON_HOVERED = {110, 110, 110, 255};
@@ -46,8 +62,9 @@ const Clay_Color COLOR_BORDER_TEXTBOX_FOCUSED = {200, 200, 200, 255};
 const Clay_Color COLOR_BORDER_BUTTON = {150, 150, 150, 255};
 const Clay_Color COLOR_BORDER_DROPDOWN = {150, 150, 150, 255};
 const Clay_Color COLOR_WHITE = {255, 255, 255, 255};
-const Clay_Color COLOR_RED = {255, 0, 0, 255};
-const Clay_Color COLOR_GREEN = {0, 255, 0, 255};
+const Clay_Color COLOR_BLACK = {0, 0, 0, 255};
+const Clay_Color COLOR_GRAY = {140, 140, 140, 255};
+const Clay_Color COLOR_LIGHTGRAY = {200, 200, 200, 255};
 
 typedef struct
 {
@@ -58,13 +75,25 @@ typedef struct
 
 typedef struct
 {
-    char chars[TEXTBOX_CHARS_MAX];
+    bool isNumberbox;
+    bool isInt;
+    float min;
+    float max;
+} NumberboxConfig;
+
+typedef struct
+{
+    char chars[TEXTBOX_CHARS_MAX + 1];
+    const char *charsDefault;
     size_t length;
     size_t cursorPosition;
+    NumberboxConfig numberboxConfig;
+    bool isInit;
 } TextboxBuffer;
 
 typedef struct
 {
+    // bool *disabled;
     TextboxBuffer *textboxBuffers;
     bool hoveringTextbox;
     FocusData focusData;
@@ -85,9 +114,11 @@ typedef struct
     const char *hoveredValue;
 } DropdownData;
 
+// bool disabled[TEXTBOX_ID_DUMMY_LAST] = {0};
 TextboxBuffer textboxBuffers[TEXTBOX_ID_DUMMY_LAST] = {0};
 
 TextboxData textboxData = {
+    // .disabled = disabled
     .textboxBuffers = textboxBuffers,
     .hoveringTextbox = false,
     .focusData = {
@@ -106,28 +137,50 @@ DropdownData dropdownData = {
     .hoveredValue = NULL,
 };
 
-Clay_TextElementConfig *defaultTextConfig;
 Clay_Padding defaultBoxPadding;
 Clay_CornerRadius defaultCornerRadius;
 
-// bool once = true;
+const char *getTextboxValue(TextboxID textboxId)
+{
+    // printf("DEBUG: chars = %s\n", textboxData.textboxBuffers[textboxId].chars);
+    // printf("DEBUG: charsDefault = %s\n", textboxData.textboxBuffers[textboxId].charsDefault);
+    if (textboxData.textboxBuffers[textboxId].length > 0)
+    {
+        return textboxData.textboxBuffers[textboxId].chars;
+    }
+    return textboxData.textboxBuffers[textboxId].charsDefault;
+}
+
+const char *getDropdownValue(DropdownID dropdownId)
+{
+    return dropdownData.selectedValues[dropdownId];
+}
 
 int convert()
 {
     char cmd[1024] = {0};
+    const char *str;
     strcat(cmd, "ffmpeg -i \"");
-    strcat(cmd, textboxData.textboxBuffers[TEXTBOX_ID_INPUT_PATH].chars);
+    if ((str = getTextboxValue(TEXTBOX_ID_INPUT_PATH)))
+    {
+        strcat(cmd, str);
+    }
     strcat(cmd, "\" -vf \"");
-    strcat(cmd, textboxData.textboxBuffers[TEXTBOX_ID_FILTERS].chars);
+    // strcat(cmd, textboxData.textboxBuffers[TEXTBOX_ID_FILTERS].chars);
     strcat(cmd, "\" \"");
-    strcat(cmd, textboxData.textboxBuffers[TEXTBOX_ID_OUTPUT_PATH].chars);
+    if ((str = getTextboxValue(TEXTBOX_ID_OUTPUT_PATH)))
+    {
+        strcat(cmd, str);
+    }
     strcat(cmd, "\"");
     printf("DEBUG: cmd = %s\n", cmd);
-    printf("DEBUG: dropdown (test) = %s\n", dropdownData.selectedValues[DROPDOWN_ID_TEST]);
+    printf("DEBUG: dropdown (test) = %s\n", getDropdownValue(DROPDOWN_ID_TEST));
     return system(cmd);
 }
 
-void HandleTextboxInteraction(Clay_ElementId elementId, Clay_PointerData pointerData, intptr_t userData)
+void HandleTextboxInteraction(Clay_ElementId elementId,
+                              Clay_PointerData pointerData,
+                              intptr_t userData)
 {
     if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
@@ -141,7 +194,9 @@ void HandleTextboxInteraction(Clay_ElementId elementId, Clay_PointerData pointer
     }
 }
 
-void HandleConvertButtonInteraction(Clay_ElementId elementId, Clay_PointerData pointerData, intptr_t userData)
+void HandleConvertButtonInteraction(Clay_ElementId elementId,
+                                    Clay_PointerData pointerData,
+                                    intptr_t userData)
 {
     if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
@@ -154,7 +209,9 @@ void HandleConvertButtonInteraction(Clay_ElementId elementId, Clay_PointerData p
     }
 }
 
-void HandleBrowseButtonInteraction(Clay_ElementId elementId, Clay_PointerData pointerData, intptr_t userData)
+void HandleBrowseButtonInteraction(Clay_ElementId elementId,
+                                   Clay_PointerData pointerData,
+                                   intptr_t userData)
 {
     if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
@@ -206,7 +263,9 @@ void HandleBrowseButtonInteraction(Clay_ElementId elementId, Clay_PointerData po
     }
 }
 
-void HandleDropdownOptionInteraction(Clay_ElementId elementId, Clay_PointerData pointerData, intptr_t userData)
+void HandleDropdownOptionInteraction(Clay_ElementId elementId,
+                                     Clay_PointerData pointerData,
+                                     intptr_t userData)
 {
     if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
@@ -217,8 +276,19 @@ void HandleDropdownOptionInteraction(Clay_ElementId elementId, Clay_PointerData 
     }
 }
 
-void RenderTextbox(Clay_String label, TextboxID textboxId, size_t maxCharsDisplayed)
+void RenderTextbox(Clay_String label,
+                   TextboxID textboxId,
+                   NumberboxConfig numberboxConfig,
+                   size_t maxCharsDisplayed,
+                   Clay_String defaultValue)
 {
+    if (!textboxData.textboxBuffers[textboxId].isInit)
+    {
+        textboxData.textboxBuffers[textboxId].charsDefault = defaultValue.chars;
+        textboxData.textboxBuffers[textboxId].numberboxConfig = numberboxConfig;
+        textboxData.textboxBuffers[textboxId].isInit = true;
+    }
+
     bool focused = (textboxData.focusData.focusIndex == textboxId);
 
     CLAY({
@@ -231,17 +301,24 @@ void RenderTextbox(Clay_String label, TextboxID textboxId, size_t maxCharsDispla
     {
         if (label.length > 0)
         {
-            CLAY_TEXT(label, defaultTextConfig);
+            CLAY_TEXT(label, TEXT_CONFIG_DEFAULT);
         }
 
         uint16_t borderWidth = focused ? 2 : 1;
         CLAY({
             .layout = {
                 .sizing = {
-                    .width = {.size = {.minMax = {.min = textboxData.minDimensions.x * (maxCharsDisplayed + 2)}}},
+                    .width = {
+                        .size = {
+                            .minMax = {
+                                .min = textboxData.minDimensions.x * (maxCharsDisplayed + 2),
+                            },
+                        },
+                    },
                 },
                 .padding = defaultBoxPadding,
             },
+            // .backgroundColor = textboxData.disabled[textboxId] ? COLOR_BG_TEXTBOX_DISABLED : COLOR_BG_TEXTBOX,
             .backgroundColor = COLOR_BG_TEXTBOX,
             .cornerRadius = CLAY_CORNER_RADIUS(8),
             .border = {
@@ -268,8 +345,15 @@ void RenderTextbox(Clay_String label, TextboxID textboxId, size_t maxCharsDispla
 
                 if (buffer->length == 0)
                 {
-                    CLAY_TEXT(CLAY_STRING(""), defaultTextConfig);
-                    CLAY_TEXT(CLAY_STRING(" "), defaultTextConfig);
+                    CLAY_TEXT(CLAY_STRING(""), TEXT_CONFIG_DEFAULT);
+                    if (defaultValue.length > 0)
+                    {
+                        CLAY_TEXT(defaultValue, TEXT_CONFIG_FAINT);
+                    }
+                    else
+                    {
+                        CLAY_TEXT(CLAY_STRING(" "), TEXT_CONFIG_DEFAULT);
+                    }
                 }
                 else
                 {
@@ -300,8 +384,8 @@ void RenderTextbox(Clay_String label, TextboxID textboxId, size_t maxCharsDispla
                         .chars = buffer->chars + buffer->cursorPosition,
                     };
 
-                    CLAY_TEXT(textBeforeCursor, defaultTextConfig);
-                    CLAY_TEXT(textAfterCursor, defaultTextConfig);
+                    CLAY_TEXT(textBeforeCursor, TEXT_CONFIG_DEFAULT);
+                    CLAY_TEXT(textAfterCursor, TEXT_CONFIG_DEFAULT);
                 }
             }
         }
@@ -324,7 +408,7 @@ void RenderBrowseButton(TextboxID textboxId)
     {
         Clay_OnHover(HandleBrowseButtonInteraction, textboxId);
 
-        CLAY_TEXT(CLAY_STRING("..."), defaultTextConfig);
+        CLAY_TEXT(CLAY_STRING("..."), TEXT_CONFIG_DEFAULT);
     }
 }
 
@@ -352,7 +436,7 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
     {
         if (label.length > 0)
         {
-            CLAY_TEXT(label, defaultTextConfig);
+            CLAY_TEXT(label, TEXT_CONFIG_DEFAULT);
         }
 
         Clay_CornerRadius buttonCornerRadius;
@@ -372,7 +456,11 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
             .layout = {
                 .sizing = {
                     .width = {
-                        .size = {.minMax = {.min = textboxData.minDimensions.x * (maxLength + 2)}},
+                        .size = {
+                            .minMax = {
+                                .min = textboxData.minDimensions.x * (maxLength + 2),
+                            },
+                        },
                         .type = CLAY__SIZING_TYPE_FIXED,
                     },
                 },
@@ -394,7 +482,7 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
                 },
             })
             {
-                CLAY_TEXT(options[dropdownData.selectedOptions[dropdownId]].label, defaultTextConfig);
+                CLAY_TEXT(options[dropdownData.selectedOptions[dropdownId]].label, TEXT_CONFIG_DEFAULT);
             }
 
             if (dropdownHovered)
@@ -427,7 +515,11 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
                                 .layout = {
                                     .sizing = {
                                         .width = {
-                                            .size = {.minMax = {.min = textboxData.minDimensions.x * (maxLength + 2)}},
+                                            .size = {
+                                                .minMax = {
+                                                    .min = textboxData.minDimensions.x * (maxLength + 2),
+                                                },
+                                            },
                                             .type = CLAY__SIZING_TYPE_FIXED,
                                         },
                                     },
@@ -445,7 +537,7 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
 
                                 Clay_OnHover(HandleDropdownOptionInteraction, dropdownId);
 
-                                CLAY_TEXT(options[i].label, defaultTextConfig);
+                                CLAY_TEXT(options[i].label, TEXT_CONFIG_DEFAULT);
                             }
                         }
                     }
@@ -457,12 +549,6 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
 
 void LayoutCreator_Initialize(Font defaultFont)
 {
-    defaultTextConfig = CLAY_TEXT_CONFIG({
-        .fontId = FONT_ID_BODY_16,
-        .fontSize = 16,
-        .textColor = {255, 255, 255, 255},
-    });
-
     textboxData.minDimensions = MeasureTextEx(defaultFont, "1", 16, 0);
 
     defaultBoxPadding = (Clay_Padding){
@@ -520,7 +606,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             .id = CLAY_ID("LeftSectionContainer"),
             .layout = {
                 .padding = CLAY_PADDING_ALL(16),
-                .childGap = 16,
+                .childGap = textboxData.minDimensions.y,
                 .layoutDirection = CLAY_TOP_TO_BOTTOM,
             },
             .backgroundColor = COLOR_BG_SECTION,
@@ -531,25 +617,60 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             },
         })
         {
-            CLAY_TEXT(CLAY_STRING("Select File: "), defaultTextConfig);
-
             CLAY({.layout = {.childGap = 4}})
             {
-                RenderTextbox(CLAY_STRING("Input File:"), TEXTBOX_ID_INPUT_PATH, 30);
+                RenderTextbox(CLAY_STRING("Input File:"),
+                              TEXTBOX_ID_INPUT_PATH,
+                              (NumberboxConfig){0},
+                              30,
+                              CLAY_STRING("default"));
+
                 RenderBrowseButton(TEXTBOX_ID_INPUT_PATH);
             }
 
-            RenderDropdown(CLAY_STRING("Filters:"), DROPDOWN_ID_TEST, (DropdownOption[]){
-                                                                          DROPDOWN_OPTION_UNSELECTED,
-                                                                          {CLAY_STRING("Option 1"), "Option 1"},
-                                                                          {CLAY_STRING("Option 2 blah"), "Option 2"},
-                                                                          {CLAY_STRING("Option 3 yo"), "Option 3"},
-                                                                          DROPDOWN_OPTION_NULL,
-                                                                      });
+            RenderTextbox(CLAY_STRING("FPS:"),
+                          TEXTBOX_ID_FILTER_FPS,
+                          (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 1, .max = 30},
+                          2,
+                          CLAY_STRING("30"));
+
+            CLAY({
+                .layout = {
+                    .childGap = textboxData.minDimensions.x,
+                },
+            })
+            {
+                RenderTextbox(CLAY_STRING("Duration:"),
+                              TEXTBOX_ID_DURATION_START,
+                              (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLT_MAX},
+                              12,
+                              CLAY_STRING("0.0"));
+
+                RenderTextbox(CLAY_STRING("to"),
+                              TEXTBOX_ID_DURATION_END,
+                              (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLT_MAX},
+                              2,
+                              CLAY_STRING("0.0"));
+            }
+
+            RenderDropdown(CLAY_STRING("Filters:"),
+                           DROPDOWN_ID_TEST,
+                           (DropdownOption[]){
+                               DROPDOWN_OPTION_UNSELECTED,
+                               {CLAY_STRING("Option 1"), "Option 1"},
+                               {CLAY_STRING("Option 2 blah"), "Option 2"},
+                               {CLAY_STRING("Option 3 yo"), "Option 3"},
+                               DROPDOWN_OPTION_NULL,
+                           });
 
             CLAY({.layout = {.childGap = 4}})
             {
-                RenderTextbox(CLAY_STRING("Output Folder:"), TEXTBOX_ID_OUTPUT_PATH, 27);
+                RenderTextbox(CLAY_STRING("Output Folder:"),
+                              TEXTBOX_ID_OUTPUT_PATH,
+                              (NumberboxConfig){0},
+                              27,
+                              CLAY_STRING(""));
+
                 RenderBrowseButton(TEXTBOX_ID_OUTPUT_PATH);
             }
 
@@ -557,47 +678,47 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             {
                 Clay_OnHover(HandleConvertButtonInteraction, 0);
 
-                CLAY_TEXT(CLAY_STRING("Convert"), defaultTextConfig);
+                CLAY_TEXT(CLAY_STRING("Convert"), TEXT_CONFIG_DEFAULT);
             }
         }
 
-        CLAY({
-            .id = CLAY_ID("RightSectionContainer"),
-            .layout = {
-                .padding = CLAY_PADDING_ALL(16),
-                .childGap = 16,
-                .layoutDirection = CLAY_TOP_TO_BOTTOM,
-            },
-            .backgroundColor = COLOR_BG_SECTION,
-            .cornerRadius = CLAY_CORNER_RADIUS(16),
-            .clip = {
-                .vertical = true,
-                .horizontal = true,
-                .childOffset = Clay_GetScrollOffset(),
-            },
-        })
-        {
-            CLAY_TEXT(CLAY_STRING("Preview"), defaultTextConfig);
+        // CLAY({
+        //     .id = CLAY_ID("RightSectionContainer"),
+        //     .layout = {
+        //         .padding = CLAY_PADDING_ALL(16),
+        //         .childGap = 16,
+        //         .layoutDirection = CLAY_TOP_TO_BOTTOM,
+        //     },
+        //     .backgroundColor = COLOR_BG_SECTION,
+        //     .cornerRadius = CLAY_CORNER_RADIUS(16),
+        //     .clip = {
+        //         .vertical = true,
+        //         .horizontal = true,
+        //         .childOffset = Clay_GetScrollOffset(),
+        //     },
+        // })
+        // {
+        //     CLAY_TEXT(CLAY_STRING("Preview"), defaultTextConfig);
 
-            for (size_t i = 0; i < NUM_TEST; i++)
-            {
-                CLAY({
-                    .layout = {
-                        .padding = CLAY_PADDING_ALL(16),
-                    },
-                    .backgroundColor = (i == textboxData.focusData.focusIndex) ? COLOR_GREEN : COLOR_RED,
-                    .cornerRadius = CLAY_CORNER_RADIUS(8),
-                })
-                {
-                    Clay_OnHover(HandleTextboxInteraction, i);
-                    if (Clay_Hovered())
-                    {
-                        textboxData.hoveringTextbox = true;
-                    }
-                    CLAY_TEXT(CLAY_STRING(""), defaultTextConfig);
-                }
-            }
-        }
+        //     for (size_t i = 0; i < NUM_TEST; i++)
+        //     {
+        //         CLAY({
+        //             .layout = {
+        //                 .padding = CLAY_PADDING_ALL(16),
+        //             },
+        //             .backgroundColor = (i == textboxData.focusData.focusIndex) ? COLOR_GREEN : COLOR_RED,
+        //             .cornerRadius = CLAY_CORNER_RADIUS(8),
+        //         })
+        //         {
+        //             Clay_OnHover(HandleTextboxInteraction, i);
+        //             if (Clay_Hovered())
+        //             {
+        //                 textboxData.hoveringTextbox = true;
+        //             }
+        //             CLAY_TEXT(CLAY_STRING(""), defaultTextConfig);
+        //         }
+        //     }
+        // }
     }
 
     TextboxBuffer *buffer;
@@ -609,7 +730,15 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         int key;
         while ((key = GetCharPressed()))
         {
-            if (key >= 32 && key <= 126 && buffer->length < TEXTBOX_CHARS_MAX)
+            int charCodeLowerBound = ' ';
+            int charCodeUpperBound = '~';
+            if (buffer->numberboxConfig.isNumberbox)
+            {
+                charCodeLowerBound = '0';
+                charCodeUpperBound = '9';
+            }
+
+            if (((key >= charCodeLowerBound && key <= charCodeUpperBound) || (!buffer->numberboxConfig.isInt && key == '.' && strchr(buffer->chars, '.') == NULL)) && buffer->length < TEXTBOX_CHARS_MAX)
             {
                 size_t i = ++buffer->length;
                 for (i; i > buffer->cursorPosition; i--)
@@ -618,6 +747,21 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 }
                 buffer->chars[buffer->cursorPosition] = key;
                 buffer->cursorPosition++;
+
+                if (buffer->numberboxConfig.isNumberbox && key != '.')
+                {
+                    float clampedVal = atof(buffer->chars);
+                    clampedVal = CLAMP(clampedVal, buffer->numberboxConfig.min, buffer->numberboxConfig.max);
+
+                    int charsWritten = snprintf(buffer->chars, TEXTBOX_CHARS_MAX, "%g", clampedVal);
+                    if (charsWritten < 0)
+                    {
+                        exit(EXIT_FAILURE);
+                    }
+
+                    buffer->length = charsWritten;
+                    buffer->cursorPosition = charsWritten;
+                }
             }
         }
 
@@ -685,6 +829,14 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 buffer->length -= offset;
                 textboxData.focusData.focusStartTime = GetTime();
             }
+
+            if (buffer->numberboxConfig.isNumberbox && buffer->length == 1 && buffer->chars[0] == '.')
+            {
+                strcpy(buffer->chars, "0.");
+                buffer->length = 2;
+                buffer->cursorPosition += 1;
+            }
+
             if (key == KEY_LEFT && nonZeroCursorPosition)
             {
                 if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
