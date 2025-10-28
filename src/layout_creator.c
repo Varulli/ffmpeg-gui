@@ -39,6 +39,7 @@ typedef enum
     TEXTBOX_ID_FILTER_FPS,
     TEXTBOX_ID_DURATION_START,
     TEXTBOX_ID_DURATION_END,
+    TEXTBOX_ID_SPEED,
     TEXTBOX_ID_OUTPUT_PATH,
     TEXTBOX_ID_DUMMY_LAST
 } TextboxID;
@@ -61,6 +62,7 @@ const Clay_Color COLOR_BORDER_TEXTBOX = {150, 150, 150, 255};
 const Clay_Color COLOR_BORDER_TEXTBOX_FOCUSED = {200, 200, 200, 255};
 const Clay_Color COLOR_BORDER_BUTTON = {150, 150, 150, 255};
 const Clay_Color COLOR_BORDER_DROPDOWN = {150, 150, 150, 255};
+const Clay_Color COLOR_TRANSPARENT = {0, 0, 0, 0};
 const Clay_Color COLOR_WHITE = {255, 255, 255, 255};
 const Clay_Color COLOR_BLACK = {0, 0, 0, 255};
 const Clay_Color COLOR_GRAY = {140, 140, 140, 255};
@@ -336,7 +338,7 @@ void RenderTextbox(Clay_String label,
             bool offInterval = (int)(floor((GetTime() - textboxData.focusData.focusStartTime) * 2)) % 2;
             CLAY({
                 .border = {
-                    .color = offInterval ? COLOR_BG_TEXTBOX : COLOR_WHITE,
+                    .color = offInterval ? COLOR_TRANSPARENT : COLOR_WHITE,
                     .width = focused ? (Clay_BorderWidth){0, 0, 0, 0, 2} : (Clay_BorderWidth){0},
                 },
             })
@@ -630,7 +632,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
             RenderTextbox(CLAY_STRING("FPS:"),
                           TEXTBOX_ID_FILTER_FPS,
-                          (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 1, .max = 30},
+                          (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 1, .max = 60},
                           2,
                           CLAY_STRING("30"));
 
@@ -652,6 +654,12 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                               2,
                               CLAY_STRING("0.0"));
             }
+
+            RenderTextbox(CLAY_STRING("Speed:"),
+                          TEXTBOX_ID_SPEED,
+                          (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
+                          4,
+                          CLAY_STRING("1.0"));
 
             RenderDropdown(CLAY_STRING("Filters:"),
                            DROPDOWN_ID_TEST,
@@ -830,11 +838,29 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 textboxData.focusData.focusStartTime = GetTime();
             }
 
-            if (buffer->numberboxConfig.isNumberbox && buffer->length == 1 && buffer->chars[0] == '.')
+            if (buffer->numberboxConfig.isNumberbox && buffer->length > 0)
             {
-                strcpy(buffer->chars, "0.");
-                buffer->length = 2;
-                buffer->cursorPosition += 1;
+                if (buffer->length == 1 && buffer->chars[0] == '.')
+                {
+                    strcpy(buffer->chars, "0.");
+                    buffer->length = 2;
+                    buffer->cursorPosition += 1;
+                }
+
+                float clampedVal = atof(buffer->chars);
+                clampedVal = CLAMP(clampedVal, buffer->numberboxConfig.min, buffer->numberboxConfig.max);
+
+                int charsWritten = snprintf(buffer->chars, TEXTBOX_CHARS_MAX, "%g", clampedVal);
+                if (charsWritten < 0)
+                {
+                    exit(EXIT_FAILURE);
+                }
+
+                buffer->length = charsWritten;
+                if (buffer->cursorPosition > buffer->length)
+                {
+                    buffer->cursorPosition = charsWritten;
+                }
             }
 
             if (key == KEY_LEFT && nonZeroCursorPosition)
