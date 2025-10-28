@@ -773,152 +773,152 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             }
         }
 
-        while ((key = GetKeyPressed()))
+        bool nonZeroCursorPosition = buffer->cursorPosition > 0;
+        bool nonMaxCursorPosition = buffer->cursorPosition < buffer->length;
+
+        bool isCtrlDown = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+        bool isShiftDown = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+
+        if ((IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) && nonZeroCursorPosition)
         {
-            bool nonZeroCursorPosition = buffer->cursorPosition > 0;
-            bool nonMaxCursorPosition = buffer->cursorPosition < buffer->length;
+            int offset = 0;
 
-            if (key == KEY_BACKSPACE && nonZeroCursorPosition)
+            if (isCtrlDown)
             {
-                int offset = 0;
-
-                if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
+                while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
+                       charMatchesAny(buffer->chars[buffer->cursorPosition - 1 - offset], " ./\\"))
                 {
-                    while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
-                           charMatchesAny(buffer->chars[buffer->cursorPosition - 1 - offset], " ./\\"))
-                    {
-                        offset++;
-                    }
-                    while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
-                           !charMatchesAny(buffer->chars[buffer->cursorPosition - 1 - offset], " ./\\"))
-                    {
-                        offset++;
-                    }
+                    offset++;
                 }
-                else
+                while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
+                       !charMatchesAny(buffer->chars[buffer->cursorPosition - 1 - offset], " ./\\"))
                 {
-                    offset = 1;
-                }
-
-                for (size_t i = buffer->cursorPosition; i <= buffer->length; i++)
-                {
-                    buffer->chars[i - offset] = buffer->chars[i];
-                }
-                buffer->cursorPosition -= offset;
-                buffer->length -= offset;
-                textboxData.focusData.focusStartTime = GetTime();
-            }
-            if (key == KEY_DELETE && nonMaxCursorPosition)
-            {
-                int offset = 0;
-
-                if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
-                {
-                    while ((int)buffer->cursorPosition + offset < buffer->length &&
-                           charMatchesAny(buffer->chars[buffer->cursorPosition + offset], " ./\\"))
-                    {
-                        offset++;
-                    }
-                    while ((int)buffer->cursorPosition + offset < buffer->length &&
-                           !charMatchesAny(buffer->chars[buffer->cursorPosition + offset], " ./\\"))
-                    {
-                        offset++;
-                    }
-                }
-                else
-                {
-                    offset = 1;
-                }
-
-                for (size_t i = buffer->cursorPosition; i <= buffer->length - offset; i++)
-                {
-                    buffer->chars[i] = buffer->chars[i + offset];
-                }
-                buffer->length -= offset;
-                textboxData.focusData.focusStartTime = GetTime();
-            }
-
-            if (buffer->numberboxConfig.isNumberbox && buffer->length > 0)
-            {
-                if (buffer->length == 1 && buffer->chars[0] == '.')
-                {
-                    strcpy(buffer->chars, "0.");
-                    buffer->length = 2;
-                    buffer->cursorPosition += 1;
-                }
-
-                float clampedVal = atof(buffer->chars);
-                clampedVal = CLAMP(clampedVal, buffer->numberboxConfig.min, buffer->numberboxConfig.max);
-
-                int charsWritten = snprintf(buffer->chars, TEXTBOX_CHARS_MAX, "%g", clampedVal);
-                if (charsWritten < 0)
-                {
-                    exit(EXIT_FAILURE);
-                }
-
-                buffer->length = charsWritten;
-                if (buffer->cursorPosition > buffer->length)
-                {
-                    buffer->cursorPosition = charsWritten;
+                    offset++;
                 }
             }
-
-            if (key == KEY_LEFT && nonZeroCursorPosition)
+            else
             {
-                if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
+                offset = 1;
+            }
+
+            for (size_t i = buffer->cursorPosition; i <= buffer->length; i++)
+            {
+                buffer->chars[i - offset] = buffer->chars[i];
+            }
+            buffer->cursorPosition -= offset;
+            buffer->length -= offset;
+            textboxData.focusData.focusStartTime = GetTime();
+        }
+        if ((IsKeyPressed(KEY_DELETE) || IsKeyPressedRepeat(KEY_DELETE)) && nonMaxCursorPosition)
+        {
+            int offset = 0;
+
+            if (isCtrlDown)
+            {
+                while ((int)buffer->cursorPosition + offset < buffer->length &&
+                       charMatchesAny(buffer->chars[buffer->cursorPosition + offset], " ./\\"))
                 {
-                    while (buffer->cursorPosition > 0 &&
-                           charMatchesAny(buffer->chars[buffer->cursorPosition - 1], " ./\\"))
-                    {
-                        buffer->cursorPosition--;
-                    }
-                    while (buffer->cursorPosition > 0 &&
-                           !charMatchesAny(buffer->chars[buffer->cursorPosition - 1], " ./\\"))
-                    {
-                        buffer->cursorPosition--;
-                    }
+                    offset++;
                 }
-                else
+                while ((int)buffer->cursorPosition + offset < buffer->length &&
+                       !charMatchesAny(buffer->chars[buffer->cursorPosition + offset], " ./\\"))
+                {
+                    offset++;
+                }
+            }
+            else
+            {
+                offset = 1;
+            }
+
+            for (size_t i = buffer->cursorPosition; i <= buffer->length - offset; i++)
+            {
+                buffer->chars[i] = buffer->chars[i + offset];
+            }
+            buffer->length -= offset;
+            textboxData.focusData.focusStartTime = GetTime();
+        }
+
+        if (buffer->numberboxConfig.isNumberbox && buffer->length > 0)
+        {
+            if (buffer->length == 1 && buffer->chars[0] == '.')
+            {
+                strcpy(buffer->chars, "0.");
+                buffer->length = 2;
+                buffer->cursorPosition += 1;
+            }
+
+            float clampedVal = atof(buffer->chars);
+            clampedVal = CLAMP(clampedVal, buffer->numberboxConfig.min, buffer->numberboxConfig.max);
+
+            int charsWritten = snprintf(buffer->chars, TEXTBOX_CHARS_MAX, "%g", clampedVal);
+            if (charsWritten < 0)
+            {
+                exit(EXIT_FAILURE);
+            }
+
+            buffer->length = charsWritten;
+            if (buffer->cursorPosition > buffer->length)
+            {
+                buffer->cursorPosition = charsWritten;
+            }
+        }
+
+        if ((IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)) && nonZeroCursorPosition)
+        {
+            if (isCtrlDown)
+            {
+                while (buffer->cursorPosition > 0 &&
+                       charMatchesAny(buffer->chars[buffer->cursorPosition - 1], " ./\\"))
                 {
                     buffer->cursorPosition--;
                 }
-                textboxData.focusData.focusStartTime = GetTime();
-            }
-            if (key == KEY_RIGHT && nonMaxCursorPosition)
-            {
-                if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
+                while (buffer->cursorPosition > 0 &&
+                       !charMatchesAny(buffer->chars[buffer->cursorPosition - 1], " ./\\"))
                 {
-                    while (buffer->cursorPosition < buffer->length &&
-                           charMatchesAny(buffer->chars[buffer->cursorPosition], " ./\\"))
-                    {
-                        buffer->cursorPosition++;
-                    }
-                    while (buffer->cursorPosition < buffer->length &&
-                           !charMatchesAny(buffer->chars[buffer->cursorPosition], " ./\\"))
-                    {
-                        buffer->cursorPosition++;
-                    }
+                    buffer->cursorPosition--;
                 }
-                else
+            }
+            else
+            {
+                buffer->cursorPosition--;
+            }
+            textboxData.focusData.focusStartTime = GetTime();
+        }
+        if ((IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT)) && nonMaxCursorPosition)
+        {
+            if (isCtrlDown)
+            {
+                while (buffer->cursorPosition < buffer->length &&
+                       charMatchesAny(buffer->chars[buffer->cursorPosition], " ./\\"))
                 {
                     buffer->cursorPosition++;
                 }
-                textboxData.focusData.focusStartTime = GetTime();
+                while (buffer->cursorPosition < buffer->length &&
+                       !charMatchesAny(buffer->chars[buffer->cursorPosition], " ./\\"))
+                {
+                    buffer->cursorPosition++;
+                }
             }
-            if (key == KEY_TAB)
+            else
             {
-                if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))
-                {
-                    textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + TEXTBOX_ID_DUMMY_LAST - 1) % TEXTBOX_ID_DUMMY_LAST;
-                }
-                else
-                {
-                    textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + 1) % TEXTBOX_ID_DUMMY_LAST;
-                }
-                buffer = &textboxData.textboxBuffers[textboxData.focusData.focusIndex];
-                buffer->cursorPosition = buffer->length;
-                textboxData.focusData.focusStartTime = GetTime();
+                buffer->cursorPosition++;
             }
+            textboxData.focusData.focusStartTime = GetTime();
+        }
+        if (IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB))
+        {
+            if (isShiftDown)
+            {
+                textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + TEXTBOX_ID_DUMMY_LAST - 1) % TEXTBOX_ID_DUMMY_LAST;
+            }
+            else
+            {
+                textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + 1) % TEXTBOX_ID_DUMMY_LAST;
+            }
+            buffer = &textboxData.textboxBuffers[textboxData.focusData.focusIndex];
+            buffer->cursorPosition = buffer->length;
+            textboxData.focusData.focusStartTime = GetTime();
         }
     }
     else
