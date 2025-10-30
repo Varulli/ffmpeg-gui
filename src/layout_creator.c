@@ -4,10 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <float.h>
 
-#define DROPDOWN_OPTION_NULL {CLAY_STRING(""), NULL}
-#define DROPDOWN_OPTION_UNSELECTED {CLAY_STRING("-- None --"), ""}
+#define TEXTBOX_CHARS_MAX 255
+#define FLOAT_MAX 1e5f
 
 #define TEXT_CONFIG_DEFAULT CLAY_TEXT_CONFIG({ \
     .fontId = FONT_ID_BODY_16,                 \
@@ -20,8 +19,11 @@
     .textColor = COLOR_LIGHTGRAY,            \
 })
 
-// #define NUM_TEST 5
-#define TEXTBOX_CHARS_MAX 255
+#define DROPDOWN_OPTION_NULL {CLAY_STRING(""), NULL}
+#define DROPDOWN_OPTION_UNSELECTED {CLAY_STRING("-- None --"), ""}
+
+#define LOG(format, ...) printf("\x1b[33mLOG: " format "\x1b[0m\n", __VA_ARGS__)
+#define ERROR(format, ...) printf("\x1b[31mERROR: " format "\x1b[0m\n", __VA_ARGS__)
 
 #define CLAMP(val, min, max) (val < min) ? min : (val > max) ? max \
                                                              : val
@@ -91,13 +93,13 @@ typedef struct
     size_t cursorPosition;
     NumberboxConfig numberboxConfig;
     bool isInit;
+    bool isDisabled;
 } TextboxBuffer;
 
 typedef struct
 {
-    // bool *disabled;
     TextboxBuffer *textboxBuffers;
-    bool hoveringTextbox;
+    int hoveredTextbox;
     FocusData focusData;
     Vector2 minDimensions;
 } TextboxData;
@@ -116,13 +118,11 @@ typedef struct
     const char *hoveredValue;
 } DropdownData;
 
-// bool disabled[TEXTBOX_ID_DUMMY_LAST] = {0};
 TextboxBuffer textboxBuffers[TEXTBOX_ID_DUMMY_LAST] = {0};
 
 TextboxData textboxData = {
-    // .disabled = disabled
     .textboxBuffers = textboxBuffers,
-    .hoveringTextbox = false,
+    .hoveredTextbox = -1,
     .focusData = {
         .focusRegistered = false,
         .focusIndex = -1,
@@ -144,8 +144,6 @@ Clay_CornerRadius defaultCornerRadius;
 
 const char *getTextboxValue(TextboxID textboxId)
 {
-    // printf("DEBUG: chars = %s\n", textboxData.textboxBuffers[textboxId].chars);
-    // printf("DEBUG: charsDefault = %s\n", textboxData.textboxBuffers[textboxId].charsDefault);
     if (textboxData.textboxBuffers[textboxId].length > 0)
     {
         return textboxData.textboxBuffers[textboxId].chars;
@@ -168,15 +166,14 @@ int convert()
         strcat(cmd, str);
     }
     strcat(cmd, "\" -vf \"");
-    // strcat(cmd, textboxData.textboxBuffers[TEXTBOX_ID_FILTERS].chars);
     strcat(cmd, "\" \"");
     if ((str = getTextboxValue(TEXTBOX_ID_OUTPUT_PATH)))
     {
         strcat(cmd, str);
     }
     strcat(cmd, "\"");
-    printf("DEBUG: cmd = %s\n", cmd);
-    printf("DEBUG: dropdown (test) = %s\n", getDropdownValue(DROPDOWN_ID_TEST));
+    LOG("cmd = %s", cmd);
+    LOG("dropdown (test) = %s", getDropdownValue(DROPDOWN_ID_TEST));
     return system(cmd);
 }
 
@@ -184,10 +181,9 @@ void HandleTextboxInteraction(Clay_ElementId elementId,
                               Clay_PointerData pointerData,
                               intptr_t userData)
 {
-    if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
+    size_t index = (size_t)userData;
+    if (!textboxData.textboxBuffers[index].isDisabled && pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
-        size_t index = (size_t)userData;
-
         textboxData.textboxBuffers[index].cursorPosition = textboxData.textboxBuffers[index].length;
 
         textboxData.focusData.focusRegistered = true;
@@ -206,7 +202,7 @@ void HandleConvertButtonInteraction(Clay_ElementId elementId,
 
         if (result)
         {
-            printf("DEBUG: result = %d\n", result);
+            ERROR("result = %d", result);
         }
     }
 }
@@ -241,7 +237,7 @@ void HandleBrowseButtonInteraction(Clay_ElementId elementId,
             break;
 
         default:
-            printf("DEBUG: invalid index = %zu (HandleBrowseButtonInteraction)\n", index);
+            ERROR("invalid index = %zu (HandleBrowseButtonInteraction)", index);
             return;
             break;
         }
@@ -256,11 +252,11 @@ void HandleBrowseButtonInteraction(Clay_ElementId elementId,
         }
         else if (result == NFD_CANCEL)
         {
-            // printf("DEBUG: Browse canceled (index = %zu)\n", index);
+            // LOG("Browse canceled (index = %zu)", index);
         }
         else
         {
-            printf("DEBUG: Error: %s\n", NFD_GetError());
+            LOG("Error: %s", NFD_GetError());
         }
     }
 }
@@ -281,6 +277,7 @@ void HandleDropdownOptionInteraction(Clay_ElementId elementId,
 void RenderTextbox(Clay_String label,
                    TextboxID textboxId,
                    NumberboxConfig numberboxConfig,
+                   bool isDisabled,
                    size_t maxCharsDisplayed,
                    Clay_String defaultValue)
 {
@@ -288,6 +285,7 @@ void RenderTextbox(Clay_String label,
     {
         textboxData.textboxBuffers[textboxId].charsDefault = defaultValue.chars;
         textboxData.textboxBuffers[textboxId].numberboxConfig = numberboxConfig;
+        textboxData.textboxBuffers[textboxId].isDisabled = isDisabled;
         textboxData.textboxBuffers[textboxId].isInit = true;
     }
 
@@ -320,8 +318,7 @@ void RenderTextbox(Clay_String label,
                 },
                 .padding = defaultBoxPadding,
             },
-            // .backgroundColor = textboxData.disabled[textboxId] ? COLOR_BG_TEXTBOX_DISABLED : COLOR_BG_TEXTBOX,
-            .backgroundColor = COLOR_BG_TEXTBOX,
+            .backgroundColor = textboxData.textboxBuffers[textboxId].isDisabled ? COLOR_BG_TEXTBOX_DISABLED : COLOR_BG_TEXTBOX,
             .cornerRadius = CLAY_CORNER_RADIUS(8),
             .border = {
                 .color = focused ? COLOR_BORDER_TEXTBOX_FOCUSED : COLOR_BORDER_TEXTBOX,
@@ -332,7 +329,7 @@ void RenderTextbox(Clay_String label,
             Clay_OnHover(HandleTextboxInteraction, textboxId);
             if (Clay_Hovered())
             {
-                textboxData.hoveringTextbox = true;
+                textboxData.hoveredTextbox = textboxId;
             }
 
             bool offInterval = (int)(floor((GetTime() - textboxData.focusData.focusStartTime) * 2)) % 2;
@@ -386,8 +383,16 @@ void RenderTextbox(Clay_String label,
                         .chars = buffer->chars + buffer->cursorPosition,
                     };
 
-                    CLAY_TEXT(textBeforeCursor, TEXT_CONFIG_DEFAULT);
-                    CLAY_TEXT(textAfterCursor, TEXT_CONFIG_DEFAULT);
+                    if (textboxData.textboxBuffers[textboxId].isDisabled)
+                    {
+                        CLAY_TEXT(textBeforeCursor, TEXT_CONFIG_FAINT);
+                        CLAY_TEXT(textAfterCursor, TEXT_CONFIG_FAINT);
+                    }
+                    else
+                    {
+                        CLAY_TEXT(textBeforeCursor, TEXT_CONFIG_DEFAULT);
+                        CLAY_TEXT(textAfterCursor, TEXT_CONFIG_DEFAULT);
+                    }
                 }
             }
         }
@@ -582,13 +587,25 @@ bool charMatchesAny(char c, const char *matchString)
     return false;
 }
 
+int clampFloatAsString(char *floatAsString, float min, float max)
+{
+    float clampedVal = atof(floatAsString);
+    clampedVal = CLAMP(clampedVal, min, max);
+
+    int charsWritten = snprintf(floatAsString, TEXTBOX_CHARS_MAX, "%g", clampedVal);
+    if (charsWritten < 0)
+    {
+        exit(EXIT_FAILURE);
+    }
+
+    return charsWritten;
+}
+
 Clay_RenderCommandArray LayoutCreator_CreateLayout()
 {
     Clay_BeginLayout();
 
-    bool leftClickPressed = IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
-
-    textboxData.hoveringTextbox = false;
+    textboxData.hoveredTextbox = -1;
     textboxData.focusData.focusRegistered = false;
 
     CLAY({
@@ -624,8 +641,9 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 RenderTextbox(CLAY_STRING("Input File:"),
                               TEXTBOX_ID_INPUT_PATH,
                               (NumberboxConfig){0},
+                              true,
                               30,
-                              CLAY_STRING("default"));
+                              CLAY_STRING(""));
 
                 RenderBrowseButton(TEXTBOX_ID_INPUT_PATH);
             }
@@ -633,6 +651,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             RenderTextbox(CLAY_STRING("FPS:"),
                           TEXTBOX_ID_FILTER_FPS,
                           (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 1, .max = 60},
+                          false,
                           2,
                           CLAY_STRING("30"));
 
@@ -644,20 +663,23 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             {
                 RenderTextbox(CLAY_STRING("Duration:"),
                               TEXTBOX_ID_DURATION_START,
-                              (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLT_MAX},
-                              12,
+                              (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
+                              false,
+                              6,
                               CLAY_STRING("0.0"));
 
                 RenderTextbox(CLAY_STRING("to"),
                               TEXTBOX_ID_DURATION_END,
-                              (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLT_MAX},
-                              2,
+                              (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
+                              false,
+                              6,
                               CLAY_STRING("0.0"));
             }
 
             RenderTextbox(CLAY_STRING("Speed:"),
                           TEXTBOX_ID_SPEED,
                           (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
+                          false,
                           4,
                           CLAY_STRING("1.0"));
 
@@ -676,6 +698,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 RenderTextbox(CLAY_STRING("Output Folder:"),
                               TEXTBOX_ID_OUTPUT_PATH,
                               (NumberboxConfig){0},
+                              false,
                               27,
                               CLAY_STRING(""));
 
@@ -746,7 +769,12 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 charCodeUpperBound = '9';
             }
 
-            if (((key >= charCodeLowerBound && key <= charCodeUpperBound) || (!buffer->numberboxConfig.isInt && key == '.' && strchr(buffer->chars, '.') == NULL)) && buffer->length < TEXTBOX_CHARS_MAX)
+            char *dotPosition = strchr(buffer->chars, '.');
+
+            bool keyWithinBounds = key >= charCodeLowerBound && key <= charCodeUpperBound;
+            bool validDecimalPoint = !buffer->numberboxConfig.isInt && key == '.' && dotPosition == NULL;
+
+            if ((keyWithinBounds || validDecimalPoint) && buffer->length < TEXTBOX_CHARS_MAX)
             {
                 size_t i = ++buffer->length;
                 for (i; i > buffer->cursorPosition; i--)
@@ -756,19 +784,70 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 buffer->chars[buffer->cursorPosition] = key;
                 buffer->cursorPosition++;
 
-                if (buffer->numberboxConfig.isNumberbox && key != '.')
+                if (buffer->numberboxConfig.isNumberbox)
                 {
-                    float clampedVal = atof(buffer->chars);
-                    clampedVal = CLAMP(clampedVal, buffer->numberboxConfig.min, buffer->numberboxConfig.max);
-
-                    int charsWritten = snprintf(buffer->chars, TEXTBOX_CHARS_MAX, "%g", clampedVal);
-                    if (charsWritten < 0)
+                    if (key == '.')
                     {
-                        exit(EXIT_FAILURE);
-                    }
+                        // Ensure valid float from decimal point input
+                        if (buffer->length == 1)
+                        {
+                            strcpy(buffer->chars, "0.");
+                            buffer->length = 2;
+                            buffer->cursorPosition = 2;
+                        }
 
-                    buffer->length = charsWritten;
-                    buffer->cursorPosition = charsWritten;
+                        // Clamp value if decimal point changes it
+                        if (buffer->cursorPosition != buffer->length)
+                        {
+                            int charsWritten = clampFloatAsString(buffer->chars,
+                                                                  buffer->numberboxConfig.min,
+                                                                  buffer->numberboxConfig.max);
+                            buffer->length = charsWritten;
+                            buffer->cursorPosition = charsWritten;
+                        }
+                    }
+                    else if (key == '0')
+                    {
+                        // If leading/trailing zero, don't rewrite
+                        char *firstSigPosition;
+                        char *lastSigPosition;
+
+                        for (firstSigPosition = buffer->chars; firstSigPosition < dotPosition; firstSigPosition++)
+                        {
+                            if (*firstSigPosition != '0')
+                            {
+                                break;
+                            }
+                        }
+                        for (lastSigPosition = buffer->chars + buffer->length - 1; lastSigPosition > dotPosition; lastSigPosition--)
+                        {
+                            if (*lastSigPosition != '0')
+                            {
+                                break;
+                            }
+                        }
+
+                        bool leadingZero = buffer->cursorPosition - 1 <= firstSigPosition - buffer->chars;
+                        bool trailingZero = buffer->cursorPosition - 1 >= lastSigPosition - buffer->chars;
+
+                        if (!(leadingZero || trailingZero))
+                        {
+                            int charsWritten = clampFloatAsString(buffer->chars,
+                                                                  buffer->numberboxConfig.min,
+                                                                  buffer->numberboxConfig.max);
+                            buffer->length = charsWritten;
+                            buffer->cursorPosition = charsWritten;
+                        }
+                    }
+                    else
+                    {
+                        // Any number changes value, so clamp it
+                        int charsWritten = clampFloatAsString(buffer->chars,
+                                                              buffer->numberboxConfig.min,
+                                                              buffer->numberboxConfig.max);
+                        buffer->length = charsWritten;
+                        buffer->cursorPosition = charsWritten;
+                    }
                 }
             }
         }
@@ -779,6 +858,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         bool isCtrlDown = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
         bool isShiftDown = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
 
+        // Handle BACKSPACE
         if ((IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) && nonZeroCursorPosition)
         {
             int offset = 0;
@@ -808,7 +888,29 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             buffer->cursorPosition -= offset;
             buffer->length -= offset;
             textboxData.focusData.focusStartTime = GetTime();
+
+            if (buffer->numberboxConfig.isNumberbox)
+            {
+                // Ensure valid float after deletion
+                if (buffer->length == 1 && buffer->chars[0] == '.')
+                {
+                    strcpy(buffer->chars, "0.");
+                    buffer->length = 2;
+                    buffer->cursorPosition += 1;
+                }
+                else if (buffer->length > 1)
+                {
+                    int charsWritten = clampFloatAsString(buffer->chars, buffer->numberboxConfig.min, buffer->numberboxConfig.max);
+                    buffer->length = charsWritten;
+                    if (buffer->cursorPosition > buffer->length)
+                    {
+                        buffer->cursorPosition = charsWritten;
+                    }
+                }
+            }
         }
+
+        // Handle DELETE
         if ((IsKeyPressed(KEY_DELETE) || IsKeyPressedRepeat(KEY_DELETE)) && nonMaxCursorPosition)
         {
             int offset = 0;
@@ -837,33 +939,29 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             }
             buffer->length -= offset;
             textboxData.focusData.focusStartTime = GetTime();
-        }
 
-        if (buffer->numberboxConfig.isNumberbox && buffer->length > 0)
-        {
-            if (buffer->length == 1 && buffer->chars[0] == '.')
+            if (buffer->numberboxConfig.isNumberbox)
             {
-                strcpy(buffer->chars, "0.");
-                buffer->length = 2;
-                buffer->cursorPosition += 1;
-            }
-
-            float clampedVal = atof(buffer->chars);
-            clampedVal = CLAMP(clampedVal, buffer->numberboxConfig.min, buffer->numberboxConfig.max);
-
-            int charsWritten = snprintf(buffer->chars, TEXTBOX_CHARS_MAX, "%g", clampedVal);
-            if (charsWritten < 0)
-            {
-                exit(EXIT_FAILURE);
-            }
-
-            buffer->length = charsWritten;
-            if (buffer->cursorPosition > buffer->length)
-            {
-                buffer->cursorPosition = charsWritten;
+                // Ensure valid float after deletion
+                if (buffer->length == 1 && buffer->chars[0] == '.')
+                {
+                    strcpy(buffer->chars, "0.");
+                    buffer->length = 2;
+                    buffer->cursorPosition += 1;
+                }
+                else if (buffer->length > 1)
+                {
+                    int charsWritten = clampFloatAsString(buffer->chars, buffer->numberboxConfig.min, buffer->numberboxConfig.max);
+                    buffer->length = charsWritten;
+                    if (buffer->cursorPosition > buffer->length)
+                    {
+                        buffer->cursorPosition = charsWritten;
+                    }
+                }
             }
         }
 
+        // Handle LEFT
         if ((IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)) && nonZeroCursorPosition)
         {
             if (isCtrlDown)
@@ -885,6 +983,8 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             }
             textboxData.focusData.focusStartTime = GetTime();
         }
+
+        // Handle RIGHT
         if ((IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT)) && nonMaxCursorPosition)
         {
             if (isCtrlDown)
@@ -906,15 +1006,23 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             }
             textboxData.focusData.focusStartTime = GetTime();
         }
+
+        // Handle TAB while focused
         if (IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB))
         {
             if (isShiftDown)
             {
-                textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + TEXTBOX_ID_DUMMY_LAST - 1) % TEXTBOX_ID_DUMMY_LAST;
+                do
+                {
+                    textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + TEXTBOX_ID_DUMMY_LAST - 1) % TEXTBOX_ID_DUMMY_LAST;
+                } while (textboxData.textboxBuffers[textboxData.focusData.focusIndex].isDisabled);
             }
             else
             {
-                textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + 1) % TEXTBOX_ID_DUMMY_LAST;
+                do
+                {
+                    textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + 1) % TEXTBOX_ID_DUMMY_LAST;
+                } while (textboxData.textboxBuffers[textboxData.focusData.focusIndex].isDisabled);
             }
             buffer = &textboxData.textboxBuffers[textboxData.focusData.focusIndex];
             buffer->cursorPosition = buffer->length;
@@ -923,25 +1031,26 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
     }
     else
     {
-        int key;
-        while ((key = GetKeyPressed()))
+        // Handle TAB while unfocused
+        if (IsKeyPressed(KEY_TAB))
         {
-            if (key == KEY_TAB)
+            do
             {
-                textboxData.focusData.focusIndex = 0;
-                buffer = &textboxData.textboxBuffers[textboxData.focusData.focusIndex];
-                buffer->cursorPosition = buffer->length;
-                textboxData.focusData.focusStartTime = GetTime();
-            }
+                textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + 1) % TEXTBOX_ID_DUMMY_LAST;
+            } while (textboxData.textboxBuffers[textboxData.focusData.focusIndex].isDisabled);
+            buffer = &textboxData.textboxBuffers[textboxData.focusData.focusIndex];
+            buffer->cursorPosition = buffer->length;
+            textboxData.focusData.focusStartTime = GetTime();
         }
     }
 
-    if (leftClickPressed && !textboxData.focusData.focusRegistered)
+    // Unfocus on empty left-click
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && !textboxData.focusData.focusRegistered)
     {
         textboxData.focusData.focusIndex = -1;
     }
 
-    SetMouseCursor(textboxData.hoveringTextbox ? MOUSE_CURSOR_IBEAM : MOUSE_CURSOR_DEFAULT);
+    SetMouseCursor(textboxData.hoveredTextbox >= 0 && !textboxData.textboxBuffers[textboxData.hoveredTextbox].isDisabled ? MOUSE_CURSOR_IBEAM : MOUSE_CURSOR_DEFAULT);
 
     return Clay_EndLayout();
 }
