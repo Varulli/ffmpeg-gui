@@ -399,7 +399,11 @@ void RenderTextbox(Clay_String label,
     }
 }
 
-void RenderBrowseButton(TextboxID textboxId)
+void RenderButton(Clay_String label,
+                  void (*onHoverFunction)(Clay_ElementId elementId,
+                                          Clay_PointerData pointerData,
+                                          intptr_t userData),
+                  intptr_t userData)
 {
     CLAY({
         .layout = {
@@ -413,10 +417,20 @@ void RenderBrowseButton(TextboxID textboxId)
         },
     })
     {
-        Clay_OnHover(HandleBrowseButtonInteraction, textboxId);
+        Clay_OnHover(onHoverFunction, userData);
 
-        CLAY_TEXT(CLAY_STRING("..."), TEXT_CONFIG_DEFAULT);
+        CLAY_TEXT(label, TEXT_CONFIG_DEFAULT);
     }
+}
+
+void RenderBrowseButton(TextboxID textboxId)
+{
+    RenderButton(CLAY_STRING("..."), HandleBrowseButtonInteraction, textboxId);
+}
+
+void RenderConvertButton()
+{
+    RenderButton(CLAY_STRING("Convert"), HandleConvertButtonInteraction, 0);
 }
 
 void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *options)
@@ -705,12 +719,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 RenderBrowseButton(TEXTBOX_ID_OUTPUT_PATH);
             }
 
-            CLAY(0)
-            {
-                Clay_OnHover(HandleConvertButtonInteraction, 0);
-
-                CLAY_TEXT(CLAY_STRING("Convert"), TEXT_CONFIG_DEFAULT);
-            }
+            RenderConvertButton();
         }
 
         // CLAY({
