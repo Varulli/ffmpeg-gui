@@ -11,13 +11,12 @@ void HandleClayErrors(Clay_ErrorData errorData)
 Clay_RenderCommandArray CreateLayout(Clay_Context *context)
 {
     Clay_SetCurrentContext(context);
-    Clay_SetDebugModeEnabled(true);
     // Run once per frame
     Clay_SetLayoutDimensions((Clay_Dimensions){
         .width = GetScreenWidth(),
-        .height = GetScreenHeight()});
+        .height = GetScreenHeight(),
+    });
     Vector2 mousePosition = GetMousePosition();
-    // mousePosition.y -= data->yOffset;
     Vector2 scrollDelta = GetMouseWheelMoveV();
     Clay_SetPointerState(
         (Clay_Vector2){mousePosition.x, mousePosition.y},
@@ -35,8 +34,11 @@ int main(void)
 
     Font fonts[FONT_ID_DUMMY_LAST];
     fonts[FONT_ID_BODY_16] = LoadFontEx("resources/consolas.ttf", 16, NULL, 400);
-    fonts[FONT_ID_TEST_16] = LoadFontEx("resources/ostrich-regular.ttf", 16, NULL, 400);
-    SetTextureFilter(fonts[FONT_ID_BODY_16].texture, TEXTURE_FILTER_BILINEAR);
+    fonts[FONT_ID_BOLD_16] = LoadFontEx("resources/consolas-bold.ttf", 16, NULL, 400);
+    for (size_t i = 0; i < FONT_ID_DUMMY_LAST; i++)
+    {
+        SetTextureFilter(fonts[i].texture, TEXTURE_FILTER_BILINEAR);
+    }
 
     uint64_t clayRequiredMemory = Clay_MinMemorySize();
 
@@ -45,6 +47,8 @@ int main(void)
     Clay_SetMeasureTextFunction(Raylib_MeasureText, fonts);
 
     LayoutCreator_Initialize(fonts[FONT_ID_BODY_16]);
+
+    // Clay_SetDebugModeEnabled(true);
 
     while (!WindowShouldClose())
     {
