@@ -47,7 +47,8 @@ typedef enum
     TEXTBOX_ID_DURATION_START,
     TEXTBOX_ID_DURATION_END,
     TEXTBOX_ID_SPEED,
-    TEXTBOX_ID_OUTPUT_PATH,
+    TEXTBOX_ID_OUTPUT_FOLDER,
+    TEXTBOX_ID_OUTPUT_NAME,
     TEXTBOX_ID_SCALE_W,
     TEXTBOX_ID_SCALE_H,
     TEXTBOX_ID_CROP_W,
@@ -247,7 +248,7 @@ int convert()
 
     // Output path
     p += snprintf(p, sizeof(cmd), "\" \"");
-    if ((str = getTextboxValue(TEXTBOX_ID_OUTPUT_PATH))[0])
+    if ((str = getTextboxValue(TEXTBOX_ID_OUTPUT_FOLDER))[0])
     {
         p += snprintf(p, sizeof(cmd), str);
     }
@@ -256,6 +257,16 @@ int convert()
         LOG("no output");
         return 1;
     }
+
+    if (strchr(str, '\\') != NULL)
+    {
+        p += snprintf(p, sizeof(cmd), "\\");
+    }
+    else
+    {
+        p += snprintf(p, sizeof(cmd), "/");
+    }
+    p += snprintf(p, sizeof(cmd), getTextboxValue(TEXTBOX_ID_OUTPUT_NAME));
     p += snprintf(p, sizeof(cmd), "\"");
 
     if (p - cmd >= sizeof(cmd))
@@ -264,7 +275,7 @@ int convert()
     }
 
     LOG("cmd = \"%s\"", cmd);
-    // return system(cmd);
+
     return -1;
 }
 
@@ -324,7 +335,7 @@ void HandleBrowseButtonInteraction(
             result = NFD_OpenDialogU8_With(&outPath, &openDialogArgs);
             break;
 
-        case TEXTBOX_ID_OUTPUT_PATH:
+        case TEXTBOX_ID_OUTPUT_FOLDER:
             nfdpickfolderu8args_t pickFolderArgs = {0};
             result = NFD_PickFolderU8_With(&outPath, &pickFolderArgs);
             break;
@@ -795,7 +806,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             {
                 RenderTextbox(
                     CLAY_STRING("Output Folder:"),
-                    TEXTBOX_ID_OUTPUT_PATH,
+                    TEXTBOX_ID_OUTPUT_FOLDER,
                     (NumberboxConfig){0},
                     false,
                     27,
@@ -805,8 +816,16 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     CLAY_STRING("..."),
                     BUTTON_ID_BROWSE_OUTPUT,
                     HandleBrowseButtonInteraction,
-                    TEXTBOX_ID_OUTPUT_PATH);
+                    TEXTBOX_ID_OUTPUT_FOLDER);
             }
+
+            RenderTextbox(
+                CLAY_STRING("File Name:"),
+                TEXTBOX_ID_OUTPUT_NAME,
+                (NumberboxConfig){0},
+                false,
+                25,
+                CLAY_STRING("converted-file"));
 
             RenderButton(
                 CLAY_STRING(" Convert "),
