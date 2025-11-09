@@ -5,6 +5,12 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifdef _WIN32
+#define POPEN_READ_ONLY_STDERR "2>&1 1>nul"
+#else
+#define POPEN_READ_ONLY_STDERR "2>&1 1>/dev/null"
+#endif
+
 #define TEXTBOX_BUFFER_SIZE 256
 #define FLOAT_MAX 1e5f
 
@@ -27,8 +33,8 @@
 #define DROPDOWN_OPTION_NULL {CLAY_STRING(""), NULL}
 #define DROPDOWN_OPTION_UNSELECTED {CLAY_STRING("-- None --"), ""}
 
-#define LOG(format, ...) printf("\x1b[33mLOG: " format "\x1b[0m\n", __VA_ARGS__)
-#define ERROR(format, ...) fprintf(stderr, "\x1b[31mERROR: " format "\x1b[0m\n", __VA_ARGS__)
+#define LOG(format, ...) printf("\x1b[33mLOG: " format "\x1b[0m\n", ##__VA_ARGS__)
+#define ERROR(format, ...) fprintf(stderr, "\x1b[31mERROR: " format "\x1b[0m\n", ##__VA_ARGS__)
 
 #define CLAMP(val, min, max) (val < min) ? min : (val > max) ? max \
                                                              : val
@@ -267,7 +273,7 @@ int convert()
         p += snprintf(p, sizeof(cmd), "/");
     }
     p += snprintf(p, sizeof(cmd), getTextboxValue(TEXTBOX_ID_OUTPUT_NAME));
-    p += snprintf(p, sizeof(cmd), "\"");
+    p += snprintf(p, sizeof(cmd), "\" " POPEN_READ_ONLY_STDERR);
 
     if (p - cmd >= sizeof(cmd))
     {
