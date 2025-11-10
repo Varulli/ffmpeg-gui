@@ -6,9 +6,10 @@
 #include <stdio.h>
 
 #ifdef _WIN32
-#define POPEN_READ_ONLY_STDERR "2>&1 1>nul"
+#include <processthreadsapi.h>
+#include <errhandlingapi.h>
 #else
-#define POPEN_READ_ONLY_STDERR "2>&1 1>/dev/null"
+#include <unistd.h>
 #endif
 
 #define TEXTBOX_BUFFER_SIZE 256
@@ -53,7 +54,7 @@ typedef enum
     TEXTBOX_ID_DURATION_START,
     TEXTBOX_ID_DURATION_END,
     TEXTBOX_ID_SPEED,
-    TEXTBOX_ID_OUTPUT_FOLDER,
+    TEXTBOX_ID_OUTPUT_DIR,
     TEXTBOX_ID_OUTPUT_NAME,
     TEXTBOX_ID_SCALE_W,
     TEXTBOX_ID_SCALE_H,
@@ -66,7 +67,8 @@ typedef enum
 
 typedef enum
 {
-    DROPDOWN_ID_TEST,
+    DROPDOWN_ID_FORMAT_IN,
+    DROPDOWN_ID_FORMAT_OUT,
     DROPDOWN_ID_DUMMY_LAST
 } DropdownID;
 
@@ -121,8 +123,6 @@ typedef struct
     size_t length;
     size_t cursorPosition;
     NumberboxConfig numberboxConfig;
-    // bool isInit;
-    // bool isDisabled;
 } TextboxBuffer;
 
 typedef struct
@@ -147,6 +147,7 @@ typedef struct
     const char **selectedValues;
     size_t hoveredOption;
     const char *hoveredValue;
+    bool *isInit;
 } DropdownData;
 
 typedef struct
@@ -171,12 +172,14 @@ TextboxData textboxData = {
 
 size_t dropdownSelectedOptions[DROPDOWN_ID_DUMMY_LAST] = {0};
 const char *dropdownSelectedValues[DROPDOWN_ID_DUMMY_LAST] = {0};
+bool dropdownIsInit[DROPDOWN_ID_DUMMY_LAST] = {0};
 
 DropdownData dropdownData = {
     .selectedOptions = dropdownSelectedOptions,
     .selectedValues = dropdownSelectedValues,
     .hoveredOption = 0,
     .hoveredValue = NULL,
+    .isInit = dropdownIsInit,
 };
 
 bool buttonIsDisabled[BUTTON_ID_DUMMY_LAST] = {0};
@@ -204,85 +207,92 @@ const char *getDropdownValue(DropdownID dropdownId)
 
 int convert()
 {
-    char cmd[2048] = {0};
-    char *p = cmd;
-    const char *str;
-
-    // Input path
-    p += snprintf(p, sizeof(cmd), "ffmpeg -i \"");
-    if ((str = getTextboxValue(TEXTBOX_ID_INPUT_PATH))[0])
+    // Validate input path
+    const char *inputPath = getTextboxValue(TEXTBOX_ID_INPUT_PATH);
+    if (!FileExists(inputPath))
     {
-        p += snprintf(p, sizeof(cmd), str);
-    }
-    else
-    {
-        LOG("no input");
+        ERROR("Input file does not exist.");
         return 1;
     }
-
-    p += snprintf(p, sizeof(cmd), "\" -vf \"");
-
-    // FPS
-    p += snprintf(p, sizeof(cmd), "fps=");
-    p += snprintf(p, sizeof(cmd), getTextboxValue(TEXTBOX_ID_FPS));
-
-    // Duration
-    p += snprintf(p, sizeof(cmd), ",trim=");
-    p += snprintf(p, sizeof(cmd), getTextboxValue(TEXTBOX_ID_DURATION_START));
-    p += snprintf(p, sizeof(cmd), ":");
-    p += snprintf(p, sizeof(cmd), getTextboxValue(TEXTBOX_ID_DURATION_END));
-
-    // Speed
-    p += snprintf(p, sizeof(cmd), ",setpts=(PTS-STARTPTS)/");
-    p += snprintf(p, sizeof(cmd), getTextboxValue(TEXTBOX_ID_SPEED));
-
-    // Scale
-    p += snprintf(p, sizeof(cmd), ",scale=");
-    p += snprintf(p, sizeof(cmd), getTextboxValue(TEXTBOX_ID_SCALE_W));
-    p += snprintf(p, sizeof(cmd), ":");
-    p += snprintf(p, sizeof(cmd), getTextboxValue(TEXTBOX_ID_SCALE_H));
-
-    // Crop
-    p += snprintf(p, sizeof(cmd), ",crop=");
-    p += snprintf(p, sizeof(cmd), getTextboxValue(TEXTBOX_ID_CROP_W));
-    p += snprintf(p, sizeof(cmd), ":");
-    p += snprintf(p, sizeof(cmd), getTextboxValue(TEXTBOX_ID_CROP_H));
-    p += snprintf(p, sizeof(cmd), ":");
-    p += snprintf(p, sizeof(cmd), getTextboxValue(TEXTBOX_ID_CROP_X));
-    p += snprintf(p, sizeof(cmd), ":");
-    p += snprintf(p, sizeof(cmd), getTextboxValue(TEXTBOX_ID_CROP_Y));
-
-    // Output path
-    p += snprintf(p, sizeof(cmd), "\" \"");
-    if ((str = getTextboxValue(TEXTBOX_ID_OUTPUT_FOLDER))[0])
+    if (!IsFileExtension(inputPath, getDropdownValue(DROPDOWN_ID_FORMAT_IN)))
     {
-        p += snprintf(p, sizeof(cmd), str);
-    }
-    else
-    {
-        LOG("no output");
-        return 1;
+        ERROR("Incorrect input file format.");
+        return 2;
     }
 
-    if (strchr(str, '\\') != NULL)
+    // Validate output directory
+    const char *outputDir = getTextboxValue(TEXTBOX_ID_OUTPUT_DIR);
+    if (!DirectoryExists(outputDir))
     {
-        p += snprintf(p, sizeof(cmd), "\\");
-    }
-    else
-    {
-        p += snprintf(p, sizeof(cmd), "/");
-    }
-    p += snprintf(p, sizeof(cmd), getTextboxValue(TEXTBOX_ID_OUTPUT_NAME));
-    p += snprintf(p, sizeof(cmd), "\" " POPEN_READ_ONLY_STDERR);
-
-    if (p - cmd >= sizeof(cmd))
-    {
-        ERROR("cmd overflow");
+        ERROR("Output directory does not exist");
+        return 3;
     }
 
-    LOG("cmd = \"%s\"", cmd);
+    // Validate output filename
+    const char *outputName = GetFileNameWithoutExt(getTextboxValue(TEXTBOX_ID_OUTPUT_NAME));
+    if (!IsFileNameValid(outputName))
+    {
+        ERROR("Output filename is invalid.");
+        return 4;
+    }
 
-    return -1;
+    char buffer[2048] = {0};
+    char pathSeparator = '/';
+
+#ifdef _WIN32
+    if (strchr(outputDir, '\\'))
+    {
+        pathSeparator = '\\';
+    }
+
+    int cx = snprintf(
+        buffer,
+        sizeof(buffer),
+        "ffmpeg -y -i \"%s\" -vf \""
+        "fps=%s,"
+        "trim=%s:%s,"
+        "setpts=(PTS-STARTPTS)/%s,"
+        "scale=%s:%s,"
+        "crop=%s:%s:%s:%s\" "
+        "\"%s%c%s%s\"",
+        inputPath,
+        getTextboxValue(TEXTBOX_ID_FPS),
+        getTextboxValue(TEXTBOX_ID_DURATION_START),
+        getTextboxValue(TEXTBOX_ID_DURATION_END),
+        getTextboxValue(TEXTBOX_ID_SPEED),
+        getTextboxValue(TEXTBOX_ID_SCALE_W),
+        getTextboxValue(TEXTBOX_ID_SCALE_H),
+        getTextboxValue(TEXTBOX_ID_CROP_W),
+        getTextboxValue(TEXTBOX_ID_CROP_H),
+        getTextboxValue(TEXTBOX_ID_CROP_X),
+        getTextboxValue(TEXTBOX_ID_CROP_Y),
+        outputDir,
+        pathSeparator,
+        outputName,
+        getDropdownValue(DROPDOWN_ID_FORMAT_OUT));
+
+    if (cx < 0 || cx >= sizeof(buffer))
+    {
+        ERROR("Failed to write command into buffer.");
+        return 5;
+    }
+
+    LOG("cmd = \"%s\"", buffer);
+
+    STARTUPINFO si = {0};
+    PROCESS_INFORMATION pi = {0};
+    si.cb = sizeof(si);
+
+    if (!CreateProcess(NULL, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+    {
+        ERROR("CreateProcess failed (%d)", GetLastError());
+        return GetLastError();
+    }
+#else
+
+#endif
+
+    return 0;
 }
 
 void HandleTextboxInteraction(Clay_ElementId elementId,
@@ -311,7 +321,7 @@ void HandleConvertButtonInteraction(
 
         if (result)
         {
-            ERROR("result = %d", result);
+            ERROR("Convert failed (%d)", result);
         }
     }
 }
@@ -341,13 +351,13 @@ void HandleBrowseButtonInteraction(
             result = NFD_OpenDialogU8_With(&outPath, &openDialogArgs);
             break;
 
-        case TEXTBOX_ID_OUTPUT_FOLDER:
+        case TEXTBOX_ID_OUTPUT_DIR:
             nfdpickfolderu8args_t pickFolderArgs = {0};
             result = NFD_PickFolderU8_With(&outPath, &pickFolderArgs);
             break;
 
         default:
-            ERROR("invalid index = %zu (HandleBrowseButtonInteraction)", index);
+            ERROR("Invalid index = %zu (HandleBrowseButtonInteraction)", index);
             return;
             break;
         }
@@ -362,11 +372,11 @@ void HandleBrowseButtonInteraction(
         }
         else if (result == NFD_CANCEL)
         {
-            // LOG("Browse canceled (index = %zu)", index);
+            LOG("Browse canceled (index = %zu)", index);
         }
         else
         {
-            LOG("Error: %s", NFD_GetError());
+            ERROR("%s", NFD_GetError());
         }
     }
 }
@@ -541,6 +551,12 @@ void RenderButton(
 
 void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *options)
 {
+    if (!dropdownData.isInit[dropdownId])
+    {
+        dropdownData.selectedOptions[dropdownId] = 0;
+        dropdownData.selectedValues[dropdownId] = options[0].value;
+    }
+
     bool dropdownHovered = Clay_PointerOver(CLAY_IDI("DropdownButton", dropdownId)) ||
                            Clay_PointerOver(CLAY_IDI("DropdownOptions", dropdownId));
 
@@ -746,16 +762,35 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             },
             .backgroundColor = COLOR_BG_SECTION,
             .cornerRadius = CLAY_CORNER_RADIUS(16),
-            // .clip = {
-            //     .vertical = true,
-            //     .childOffset = Clay_GetScrollOffset(),
-            // },
+            .clip = {
+                .vertical = true,
+                .childOffset = Clay_GetScrollOffset(),
+            },
         })
         {
+            CLAY({.layout = {.childGap = textboxData.minDimensions.x}})
+            {
+                RenderDropdown(
+                    CLAY_STRING("Convert from"),
+                    DROPDOWN_ID_FORMAT_IN,
+                    (DropdownOption[]){
+                        {CLAY_STRING("MP4"), ".mp4"},
+                        DROPDOWN_OPTION_NULL,
+                    });
+
+                RenderDropdown(
+                    CLAY_STRING("to"),
+                    DROPDOWN_ID_FORMAT_OUT,
+                    (DropdownOption[]){
+                        {CLAY_STRING("GIF"), ".gif"},
+                        DROPDOWN_OPTION_NULL,
+                    });
+            }
+
             CLAY({.layout = {.childGap = 4}})
             {
                 RenderTextbox(
-                    CLAY_STRING("Input File:"),
+                    CLAY_STRING("      Input File:"),
                     TEXTBOX_ID_INPUT_PATH,
                     (NumberboxConfig){0},
                     false,
@@ -770,26 +805,22 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             }
 
             RenderTextbox(
-                CLAY_STRING("FPS:"),
+                CLAY_STRING("             FPS:"),
                 TEXTBOX_ID_FPS,
                 (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 1, .max = 60},
                 false,
                 2,
                 CLAY_STRING("30"));
 
-            CLAY({
-                .layout = {
-                    .childGap = textboxData.minDimensions.x,
-                },
-            })
+            CLAY({.layout = {.childGap = textboxData.minDimensions.x}})
             {
                 RenderTextbox(
-                    CLAY_STRING("Duration:"),
+                    CLAY_STRING("        Duration:"),
                     TEXTBOX_ID_DURATION_START,
                     (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
                     false,
                     6,
-                    CLAY_STRING(""));
+                    CLAY_STRING("0.0"));
 
                 RenderTextbox(
                     CLAY_STRING("to"),
@@ -801,7 +832,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             }
 
             RenderTextbox(
-                CLAY_STRING("Speed:"),
+                CLAY_STRING("           Speed:"),
                 TEXTBOX_ID_SPEED,
                 (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
                 false,
@@ -811,26 +842,26 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             CLAY({.layout = {.childGap = 4}})
             {
                 RenderTextbox(
-                    CLAY_STRING("Output Folder:"),
-                    TEXTBOX_ID_OUTPUT_FOLDER,
+                    CLAY_STRING("Output Directory:"),
+                    TEXTBOX_ID_OUTPUT_DIR,
                     (NumberboxConfig){0},
                     false,
-                    27,
+                    30,
                     CLAY_STRING(""));
 
                 RenderButton(
                     CLAY_STRING("..."),
                     BUTTON_ID_BROWSE_OUTPUT,
                     HandleBrowseButtonInteraction,
-                    TEXTBOX_ID_OUTPUT_FOLDER);
+                    TEXTBOX_ID_OUTPUT_DIR);
             }
 
             RenderTextbox(
-                CLAY_STRING("File Name:"),
+                CLAY_STRING("       File Name:"),
                 TEXTBOX_ID_OUTPUT_NAME,
                 (NumberboxConfig){0},
                 false,
-                25,
+                20,
                 CLAY_STRING("converted-file"));
 
             RenderButton(
@@ -849,11 +880,10 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             },
             .backgroundColor = COLOR_BG_SECTION,
             .cornerRadius = CLAY_CORNER_RADIUS(16),
-            // .clip = {
-            //     .vertical = true,
-            //     .horizontal = true,
-            //     .childOffset = Clay_GetScrollOffset(),
-            // },
+            .clip = {
+                .vertical = true,
+                .childOffset = Clay_GetScrollOffset(),
+            },
         })
         {
             // CLAY_TEXT(CLAY_STRING("Preview"), TEXT_CONFIG_BOLD);
@@ -1112,7 +1142,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         }
 
         // Handle DELETE
-        if ((IsKeyPressed(KEY_DELETE) || IsKeyPressedRepeat(KEY_DELETE)) && nonMaxCursorPosition)
+        else if ((IsKeyPressed(KEY_DELETE) || IsKeyPressedRepeat(KEY_DELETE)) && nonMaxCursorPosition)
         {
             int offset = 0;
 
@@ -1163,7 +1193,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         }
 
         // Handle LEFT
-        if ((IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)) && nonZeroCursorPosition)
+        else if ((IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)) && nonZeroCursorPosition)
         {
             if (isCtrlDown)
             {
@@ -1186,7 +1216,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         }
 
         // Handle RIGHT
-        if ((IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT)) && nonMaxCursorPosition)
+        else if ((IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT)) && nonMaxCursorPosition)
         {
             if (isCtrlDown)
             {
@@ -1209,7 +1239,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         }
 
         // Handle TAB while focused
-        if (IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB))
+        else if (IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB))
         {
             if (isShiftDown)
             {
