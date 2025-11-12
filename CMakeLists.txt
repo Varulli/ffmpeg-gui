@@ -8,6 +8,10 @@ include(FetchContent)
 set(FETCHCONTENT_QUIET FALSE)
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE) # don't build the supplied examples
 set(BUILD_GAMES    OFF CACHE BOOL "" FORCE) # don't build the supplied example games
+set(ENABLE_CJSON_TEST OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(ENABLE_CJSON_UNINSTALL OFF CACHE BOOL "" FORCE)
+set(ENABLE_CUSTOM_COMPILER_FLAGS OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
     raylib
@@ -16,14 +20,22 @@ FetchContent_Declare(
     GIT_PROGRESS TRUE
     GIT_SHALLOW TRUE
 )
-FetchContent_Declare(nfd
+FetchContent_Declare(
+    nfd
     GIT_REPOSITORY "https://github.com/btzy/nativefiledialog-extended.git"
     GIT_TAG "v1.2.1"
     GIT_PROGRESS TRUE
     GIT_SHALLOW TRUE
 )
+FetchContent_Declare(
+    cjson
+    GIT_REPOSITORY "https://github.com/DaveGamble/cJSON.git"
+    GIT_TAG v1.7.19
+    GIT_PROGRESS TRUE
+    GIT_SHALLOW TRUE
+)
     
-FetchContent_MakeAvailable(raylib nfd)
+FetchContent_MakeAvailable(raylib nfd cjson)
 
 file(GLOB SOURCES "src/${PROJECT_NAME}.c")
 
@@ -32,7 +44,8 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 target_link_libraries(
     ${PROJECT_NAME}
     PRIVATE raylib
-    PRIVATE nfd    
+    PRIVATE nfd
+    PRIVATE cjson
 )
 
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")

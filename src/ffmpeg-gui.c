@@ -48,7 +48,7 @@ int main(void)
 
     LayoutCreator_Initialize(fonts[FONT_ID_BODY_16]);
 
-    // Clay_SetDebugModeEnabled(true);
+    Clay_SetDebugModeEnabled(true);
 
     while (!WindowShouldClose())
     {
