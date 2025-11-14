@@ -1,5 +1,8 @@
+#include "clay.h"
+#include "raylib.h"
 #include "nfd.h"
 #include "cJSON.h"
+#include <stdio.h>
 
 #ifdef _WIN32
 #include <processthreadsapi.h>

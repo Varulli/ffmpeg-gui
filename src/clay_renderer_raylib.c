@@ -1,3 +1,4 @@
+#include "clay.h"
 #include "raylib.h"
 #include "raymath.h"
 #include "stdint.h"
@@ -251,11 +252,33 @@ void Clay_Raylib_Render(Clay_RenderCommandArray renderCommands, Font *fonts)
                     boundingBox.height - (cr.topRight + cr.bottomRight),
                     color);
 
-                // Corners
-                DrawCircle(boundingBox.x + cr.topLeft, boundingBox.y + cr.topLeft, cr.topLeft, color);
-                DrawCircle(boundingBox.x + cr.bottomLeft, boundingBox.y + (boundingBox.height - cr.bottomLeft), cr.bottomLeft, color);
-                DrawCircle(boundingBox.x + boundingBox.width - cr.bottomRight, boundingBox.y + boundingBox.height - cr.bottomRight, cr.bottomRight, color);
-                DrawCircle(boundingBox.x + boundingBox.width - cr.topRight, boundingBox.y + cr.topRight, cr.topRight, color);
+                // Top-left corner
+                DrawCircleSector((Vector2){
+                                     boundingBox.x + cr.topLeft,
+                                     boundingBox.y + cr.topLeft,
+                                 },
+                                 cr.topLeft, 180, 270, 4, color);
+
+                // Bottom-left corner
+                DrawCircleSector((Vector2){
+                                     boundingBox.x + cr.bottomLeft,
+                                     boundingBox.y + boundingBox.height - cr.bottomLeft,
+                                 },
+                                 cr.bottomLeft, 90, 180, 4, color);
+
+                // Bottom-right corner
+                DrawCircleSector((Vector2){
+                                     boundingBox.x + boundingBox.width - cr.bottomRight,
+                                     boundingBox.y + boundingBox.height - cr.bottomRight,
+                                 },
+                                 cr.bottomRight, 0, 90, 4, color);
+
+                // Top-right corner
+                DrawCircleSector((Vector2){
+                                     boundingBox.x + boundingBox.width - cr.topRight,
+                                     boundingBox.y + cr.topRight,
+                                 },
+                                 cr.topRight, 270, 360, 4, color);
             }
             else
             {
