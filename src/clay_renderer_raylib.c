@@ -1,5 +1,5 @@
-#include "../inc/raylib.h"
-#include "../inc/raymath.h"
+#include "raylib.h"
+#include "raymath.h"
 #include "stdint.h"
 #include "string.h"
 #include "stdio.h"
@@ -208,10 +208,54 @@ void Clay_Raylib_Render(Clay_RenderCommandArray renderCommands, Font *fonts)
         case CLAY_RENDER_COMMAND_TYPE_RECTANGLE:
         {
             Clay_RectangleRenderData *config = &renderCommand->renderData.rectangle;
-            if (config->cornerRadius.topLeft > 0)
+            if (config->cornerRadius.topLeft > 0 || config->cornerRadius.topRight > 0 || config->cornerRadius.bottomLeft > 0 || config->cornerRadius.bottomRight > 0)
             {
-                float radius = (config->cornerRadius.topLeft * 2) / (float)((boundingBox.width > boundingBox.height) ? boundingBox.height : boundingBox.width);
-                DrawRectangleRounded((Rectangle){boundingBox.x, boundingBox.y, boundingBox.width, boundingBox.height}, radius, 8, CLAY_COLOR_TO_RAYLIB_COLOR(config->backgroundColor));
+                float minSideLength = (boundingBox.width > boundingBox.height) ? boundingBox.height : boundingBox.width;
+                Clay_CornerRadius cr = {
+                    fminf(config->cornerRadius.topLeft, minSideLength / 2),
+                    fminf(config->cornerRadius.topRight, minSideLength / 2),
+                    fminf(config->cornerRadius.bottomLeft, minSideLength / 2),
+                    fminf(config->cornerRadius.bottomRight, minSideLength / 2),
+                };
+                Color color = CLAY_COLOR_TO_RAYLIB_COLOR(config->backgroundColor);
+
+                // Top-center
+                DrawRectangle(
+                    boundingBox.x + cr.topLeft,
+                    boundingBox.y,
+                    boundingBox.width - (cr.topLeft + cr.topRight),
+                    boundingBox.height - ((cr.bottomLeft > cr.bottomRight) ? cr.bottomLeft : cr.bottomRight),
+                    color);
+
+                // Left-center
+                DrawRectangle(
+                    boundingBox.x,
+                    boundingBox.y + cr.topLeft,
+                    boundingBox.width - ((cr.topRight > cr.bottomRight) ? cr.topRight : cr.bottomRight),
+                    boundingBox.height - (cr.topLeft + cr.bottomLeft),
+                    color);
+
+                // Bottom-center
+                DrawRectangle(
+                    boundingBox.x + cr.bottomLeft,
+                    boundingBox.y + cr.topLeft,
+                    boundingBox.width - (cr.bottomLeft + cr.bottomRight),
+                    boundingBox.height - ((cr.topLeft > cr.topRight) ? cr.topLeft : cr.topRight),
+                    color);
+
+                // Right-center
+                DrawRectangle(
+                    boundingBox.x + ((cr.topLeft > cr.bottomLeft) ? cr.topLeft : cr.bottomLeft),
+                    boundingBox.y + cr.topRight,
+                    boundingBox.width - ((cr.topLeft > cr.bottomLeft) ? cr.topLeft : cr.bottomLeft),
+                    boundingBox.height - (cr.topRight + cr.bottomRight),
+                    color);
+
+                // Corners
+                DrawCircle(boundingBox.x + cr.topLeft, boundingBox.y + cr.topLeft, cr.topLeft, color);
+                DrawCircle(boundingBox.x + cr.bottomLeft, boundingBox.y + (boundingBox.height - cr.bottomLeft), cr.bottomLeft, color);
+                DrawCircle(boundingBox.x + boundingBox.width - cr.bottomRight, boundingBox.y + boundingBox.height - cr.bottomRight, cr.bottomRight, color);
+                DrawCircle(boundingBox.x + boundingBox.width - cr.topRight, boundingBox.y + cr.topRight, cr.topRight, color);
             }
             else
             {

@@ -1,5 +1,5 @@
 #define CLAY_IMPLEMENTATION
-#include "../inc/clay.h"
+#include "clay.h"
 #include "clay_renderer_raylib.c"
 #include "layout_creator.c"
 

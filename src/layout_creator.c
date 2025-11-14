@@ -1,10 +1,5 @@
-#include "../inc/clay.h"
-#include "../inc/raylib.h"
-#include "../inc/nfd.h"
-#include "../inc/cJSON.h"
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
+#include "nfd.h"
+#include "cJSON.h"
 
 #ifdef _WIN32
 #include <processthreadsapi.h>
@@ -366,7 +361,9 @@ void HandleLoadInputButtonInteraction(
     if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
         // TODO: Load file data
-        }
+        cJSON *json = cJSON_CreateNull();
+        cJSON_Delete(json);
+    }
 }
 
 void HandleConvertButtonInteraction(
@@ -650,16 +647,17 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
 
         Clay_CornerRadius buttonCornerRadius;
         Clay_BorderWidth buttonBorderWidth;
-        // if (dropdownHovered && dropdownSize > 1)
-        // {
-        //     buttonCornerRadius = (Clay_CornerRadius){8, 8, 0, 0};
-        //     buttonBorderWidth = (Clay_BorderWidth){1, 1, 1, 0, 0};
-        // }
-        // else
-        // {
-        buttonCornerRadius = CLAY_CORNER_RADIUS(8);
-        buttonBorderWidth = (Clay_BorderWidth)CLAY_BORDER_OUTSIDE(1);
-        // }
+        bool expandDropdown = dropdownHovered && dropdownSize > 1;
+        if (expandDropdown)
+        {
+            buttonCornerRadius = (Clay_CornerRadius){8, 8, 0, 0};
+            buttonBorderWidth = (Clay_BorderWidth){1, 1, 1, 0, 0};
+        }
+        else
+        {
+            buttonCornerRadius = CLAY_CORNER_RADIUS(8);
+            buttonBorderWidth = (Clay_BorderWidth)CLAY_BORDER_OUTSIDE(1);
+        }
 
         Clay_Sizing dropdownSizing = {.width = {
                                           .size = {
@@ -697,15 +695,14 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
                 CLAY_TEXT(str, TEXT_CONFIG_DEFAULT);
             }
 
-            if (dropdownHovered && dropdownSize > 1)
+            if (expandDropdown)
             {
                 CLAY({
                     .id = CLAY_IDI("DropdownOptions", dropdownId),
                     .layout = {
                         .layoutDirection = CLAY_TOP_TO_BOTTOM,
                     },
-                    // .cornerRadius = (Clay_CornerRadius){0, 0, 8, 8},
-                    .cornerRadius = CLAY_CORNER_RADIUS(8),
+                    .cornerRadius = (Clay_CornerRadius){0, 0, 8, 8},
                     .border = {
                         .color = COLOR_BORDER_DROPDOWN,
                         .width = CLAY_BORDER_ALL(1),
@@ -946,12 +943,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                         .height = CLAY_SIZING_GROW(0),
                     },
                 },
-                // .backgroundColor = COLOR_BG_TAB_SELECTED,
-                // .cornerRadius = (Clay_CornerRadius){16, 0, 0, 0},
-                // .border = {
-                //     .color = COLOR_BORDER_TAB,
-                //     .width = CLAY_BORDER_OUTSIDE(1),
-                // },
             })
             {
                 CLAY({
@@ -999,36 +990,13 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                         .childGap = textboxData.minDimensions.y,
                     },
                     .backgroundColor = COLOR_BG_TAB_SELECTED,
-                    .cornerRadius = (Clay_CornerRadius){16, 0, 16, 16},
+                    .cornerRadius = (Clay_CornerRadius){0, 0, 16, 16},
                     .border = {
                         .color = COLOR_BORDER_TAB,
                         .width = (Clay_BorderWidth){1, 1, 0, 1, 0},
                     },
                 })
                 {
-                    CLAY({
-                        .layout = {
-                            .sizing = {
-                                .width = CLAY_SIZING_GROW(0),
-                                .height = {.size = {.minMax = {.min = 16}}},
-                            },
-                        },
-                        .backgroundColor = COLOR_BG_TAB_SELECTED,
-                        .border = {
-                            .color = COLOR_BORDER_TAB,
-                            .width = (Clay_BorderWidth){1, 1, 0, 0, 0},
-                        },
-                        .floating = {
-                            .attachPoints = {
-                                .parent = CLAY_ATTACH_POINT_LEFT_TOP,
-                            },
-                            .attachTo = CLAY_ATTACH_TO_PARENT,
-                            .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT,
-                        },
-                    })
-                    {
-                    }
-
                     CLAY_TEXT(CLAY_STRING("TEST"), TEXT_CONFIG_DEFAULT);
                 }
             }
