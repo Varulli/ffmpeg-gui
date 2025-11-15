@@ -258,7 +258,7 @@ const char *GetFilePathWithoutExt(const char *filePath)
 
 int convert()
 {
-    char buffer[2048] = {0};
+    char buffer[4096];
 
     // Validate input path
     const char *inputPath = getTextboxValue(TEXTBOX_ID_INPUT_PATH);
@@ -294,7 +294,7 @@ int convert()
     }
 
 #ifdef _WIN32
-    int cx = snprintf(
+    int ret = snprintf(
         buffer,
         sizeof(buffer),
         "ffmpeg -y -i \"%s\" -vf \""
@@ -317,7 +317,7 @@ int convert()
         getTextboxValue(TEXTBOX_ID_CROP_Y),
         outputPath);
 
-    if (cx < 0 || cx >= sizeof(buffer))
+    if (ret < 0 || ret >= sizeof(buffer))
     {
         ERROR("Failed to write command into buffer.");
         return 5;
@@ -364,8 +364,45 @@ void HandleLoadInputButtonInteraction(
     if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
         // TODO: Load file data
-        cJSON *json = cJSON_CreateNull();
+        char buffer[4096];
+
+        int ret = snprintf(
+            buffer,
+            sizeof(buffer),
+            "ffprobe -v error -show_streams -of json \"%s\"", getTextboxValue(TEXTBOX_ID_INPUT_PATH));
+
+        if (ret < 0 || ret >= sizeof(buffer))
+        {
+            ERROR("Failed to write command into buffer.");
+            return;
+        }
+
+        FILE *fp = popen(buffer, "r");
+        if (fp == NULL)
+        {
+            ERROR("Failed to execute command and establish pipe.");
+            return;
+        }
+
+        ret = fread(buffer, 1, sizeof(buffer) - 1, fp);
+        if (ret < sizeof(buffer) - 1 && ferror(fp))
+        {
+            ERROR("Failed to read command output.");
+            return;
+        }
+
+        cJSON *json = cJSON_ParseWithLength(buffer, ret);
+        if (json == NULL)
+        {
+            ERROR("Failed to parse output as JSON.");
+            return;
+        }
+
+        cJSON_PrintPreallocated(json, buffer, sizeof(buffer) - 5, cJSON_True);
+        LOG("JSON:\n%s", buffer);
+
         cJSON_Delete(json);
+        pclose(fp);
     }
 }
 
@@ -1191,18 +1228,18 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         FilePathList pathList = LoadDroppedFiles();
 
         char temp[TEXTBOX_BUFFER_SIZE];
-        int cx = snprintf(
+        int ret = snprintf(
             temp,
             sizeof(temp),
             "%s",
             pathList.paths[0]);
 
-        if (cx >= 0 && cx < sizeof(temp))
+        if (ret >= 0 && ret < sizeof(temp))
         {
             TextboxBuffer *buffer = &textboxData.textboxBuffers[TEXTBOX_ID_INPUT_PATH];
             memcpy(buffer->chars, temp, TEXTBOX_BUFFER_SIZE);
-            buffer->length = cx;
-            buffer->cursorPosition = cx;
+            buffer->length = ret;
+            buffer->cursorPosition = ret;
         }
         else
         {
