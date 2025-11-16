@@ -211,74 +211,82 @@ void Clay_Raylib_Render(Clay_RenderCommandArray renderCommands, Font *fonts)
             Clay_RectangleRenderData *config = &renderCommand->renderData.rectangle;
             if (config->cornerRadius.topLeft > 0 || config->cornerRadius.topRight > 0 || config->cornerRadius.bottomLeft > 0 || config->cornerRadius.bottomRight > 0)
             {
-                float minSideLength = (boundingBox.width > boundingBox.height) ? boundingBox.height : boundingBox.width;
-                Clay_CornerRadius cr = {
-                    fminf(config->cornerRadius.topLeft, minSideLength / 2),
-                    fminf(config->cornerRadius.topRight, minSideLength / 2),
-                    fminf(config->cornerRadius.bottomLeft, minSideLength / 2),
-                    fminf(config->cornerRadius.bottomRight, minSideLength / 2),
-                };
-                Color color = CLAY_COLOR_TO_RAYLIB_COLOR(config->backgroundColor);
+                if (config->cornerRadius.topLeft == config->cornerRadius.topRight && config->cornerRadius.topRight == config->cornerRadius.bottomLeft && config->cornerRadius.bottomLeft == config->cornerRadius.bottomRight)
+                {
+                    float radius = (config->cornerRadius.topLeft * 2) / (float)((boundingBox.width > boundingBox.height) ? boundingBox.height : boundingBox.width);
+                    DrawRectangleRounded((Rectangle){boundingBox.x, boundingBox.y, boundingBox.width, boundingBox.height}, radius, 8, CLAY_COLOR_TO_RAYLIB_COLOR(config->backgroundColor));
+                }
+                else
+                {
+                    float minSideLength = (boundingBox.width > boundingBox.height) ? boundingBox.height : boundingBox.width;
+                    Clay_CornerRadius cr = {
+                        fminf(config->cornerRadius.topLeft, minSideLength / 2),
+                        fminf(config->cornerRadius.topRight, minSideLength / 2),
+                        fminf(config->cornerRadius.bottomLeft, minSideLength / 2),
+                        fminf(config->cornerRadius.bottomRight, minSideLength / 2),
+                    };
+                    Color color = CLAY_COLOR_TO_RAYLIB_COLOR(config->backgroundColor);
 
-                // Top-center
-                DrawRectangle(
-                    boundingBox.x + cr.topLeft,
-                    boundingBox.y,
-                    boundingBox.width - (cr.topLeft + cr.topRight),
-                    boundingBox.height - ((cr.bottomLeft > cr.bottomRight) ? cr.bottomLeft : cr.bottomRight),
-                    color);
+                    // Top-center
+                    DrawRectangle(
+                        boundingBox.x + cr.topLeft,
+                        boundingBox.y,
+                        boundingBox.width - (cr.topLeft + cr.topRight),
+                        boundingBox.height - ((cr.bottomLeft > cr.bottomRight) ? cr.bottomLeft : cr.bottomRight),
+                        color);
 
-                // Left-center
-                DrawRectangle(
-                    boundingBox.x,
-                    boundingBox.y + cr.topLeft,
-                    boundingBox.width - ((cr.topRight > cr.bottomRight) ? cr.topRight : cr.bottomRight),
-                    boundingBox.height - (cr.topLeft + cr.bottomLeft),
-                    color);
+                    // Left-center
+                    DrawRectangle(
+                        boundingBox.x,
+                        boundingBox.y + cr.topLeft,
+                        boundingBox.width - ((cr.topRight > cr.bottomRight) ? cr.topRight : cr.bottomRight),
+                        boundingBox.height - (cr.topLeft + cr.bottomLeft),
+                        color);
 
-                // Bottom-center
-                DrawRectangle(
-                    boundingBox.x + cr.bottomLeft,
-                    boundingBox.y + cr.topLeft,
-                    boundingBox.width - (cr.bottomLeft + cr.bottomRight),
-                    boundingBox.height - ((cr.topLeft > cr.topRight) ? cr.topLeft : cr.topRight),
-                    color);
+                    // Bottom-center
+                    DrawRectangle(
+                        boundingBox.x + cr.bottomLeft,
+                        boundingBox.y + cr.topLeft,
+                        boundingBox.width - (cr.bottomLeft + cr.bottomRight),
+                        boundingBox.height - ((cr.topLeft > cr.topRight) ? cr.topLeft : cr.topRight),
+                        color);
 
-                // Right-center
-                DrawRectangle(
-                    boundingBox.x + ((cr.topLeft > cr.bottomLeft) ? cr.topLeft : cr.bottomLeft),
-                    boundingBox.y + cr.topRight,
-                    boundingBox.width - ((cr.topLeft > cr.bottomLeft) ? cr.topLeft : cr.bottomLeft),
-                    boundingBox.height - (cr.topRight + cr.bottomRight),
-                    color);
+                    // Right-center
+                    DrawRectangle(
+                        boundingBox.x + ((cr.topLeft > cr.bottomLeft) ? cr.topLeft : cr.bottomLeft),
+                        boundingBox.y + cr.topRight,
+                        boundingBox.width - ((cr.topLeft > cr.bottomLeft) ? cr.topLeft : cr.bottomLeft),
+                        boundingBox.height - (cr.topRight + cr.bottomRight),
+                        color);
 
-                // Top-left corner
-                DrawCircleSector((Vector2){
-                                     boundingBox.x + cr.topLeft,
-                                     boundingBox.y + cr.topLeft,
-                                 },
-                                 cr.topLeft, 180, 270, 4, color);
+                    // Top-left corner
+                    DrawCircleSector((Vector2){
+                                         boundingBox.x + cr.topLeft,
+                                         boundingBox.y + cr.topLeft,
+                                     },
+                                     cr.topLeft, 180, 270, 4, color);
 
-                // Bottom-left corner
-                DrawCircleSector((Vector2){
-                                     boundingBox.x + cr.bottomLeft,
-                                     boundingBox.y + boundingBox.height - cr.bottomLeft,
-                                 },
-                                 cr.bottomLeft, 90, 180, 4, color);
+                    // Bottom-left corner
+                    DrawCircleSector((Vector2){
+                                         boundingBox.x + cr.bottomLeft,
+                                         boundingBox.y + boundingBox.height - cr.bottomLeft,
+                                     },
+                                     cr.bottomLeft, 90, 180, 4, color);
 
-                // Bottom-right corner
-                DrawCircleSector((Vector2){
-                                     boundingBox.x + boundingBox.width - cr.bottomRight,
-                                     boundingBox.y + boundingBox.height - cr.bottomRight,
-                                 },
-                                 cr.bottomRight, 0, 90, 4, color);
+                    // Bottom-right corner
+                    DrawCircleSector((Vector2){
+                                         boundingBox.x + boundingBox.width - cr.bottomRight,
+                                         boundingBox.y + boundingBox.height - cr.bottomRight,
+                                     },
+                                     cr.bottomRight, 0, 90, 4, color);
 
-                // Top-right corner
-                DrawCircleSector((Vector2){
-                                     boundingBox.x + boundingBox.width - cr.topRight,
-                                     boundingBox.y + cr.topRight,
-                                 },
-                                 cr.topRight, 270, 360, 4, color);
+                    // Top-right corner
+                    DrawCircleSector((Vector2){
+                                         boundingBox.x + boundingBox.width - cr.topRight,
+                                         boundingBox.y + cr.topRight,
+                                     },
+                                     cr.topRight, 270, 360, 4, color);
+                }
             }
             else
             {
