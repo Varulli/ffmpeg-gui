@@ -31,7 +31,10 @@
 })
 
 #define DROPDOWN_OPTION_NULL {"", NULL}
-#define DROPDOWN_OPTION_UNSELECTED {"-- None --", ""}
+#define DROPDOWN_OPTION_UNSELECTED {"-----", ""}
+#define DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO {"Video", "v"}
+#define DROPDOWN_OPTION_OUTPUT_TYPE_AUDIO {"Audio", "a"}
+#define DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE {"Image", "i"}
 
 #define LOG(format, ...) printf("\x1b[33mLOG: " format "\x1b[0m\n", ##__VA_ARGS__)
 #define ERROR(format, ...) fprintf(stderr, "\x1b[31mERROR: " format "\x1b[0m\n", ##__VA_ARGS__)
@@ -53,20 +56,19 @@ typedef enum
     TEXTBOX_ID_DURATION_START,
     TEXTBOX_ID_DURATION_END,
     TEXTBOX_ID_SPEED,
-    TEXTBOX_ID_OUTPUT_PATH,
     TEXTBOX_ID_SCALE_W,
     TEXTBOX_ID_SCALE_H,
     TEXTBOX_ID_CROP_W,
     TEXTBOX_ID_CROP_H,
     TEXTBOX_ID_CROP_X,
     TEXTBOX_ID_CROP_Y,
+    TEXTBOX_ID_OUTPUT_PATH,
     TEXTBOX_ID_DUMMY_LAST
 } TextboxID;
 
 typedef enum
 {
-    DROPDOWN_ID_STREAM_TYPE,
-    DROPDOWN_ID_FORMAT_OUT,
+    DROPDOWN_ID_OUTPUT_TYPE,
     DROPDOWN_ID_DUMMY_LAST
 } DropdownID;
 
@@ -81,11 +83,49 @@ typedef enum
 
 typedef enum
 {
-    TAB_ID_VIDEO,
-    TAB_ID_AUDIO,
-    TAB_ID_SUBTITLE,
-    TAB_ID_DUMMY_LAST,
-} TabID;
+    STREAM_ID_VIDEO,
+    STREAM_ID_AUDIO,
+    STREAM_ID_SUBTITLE,
+    STREAM_ID_DUMMY_LAST,
+} StreamID;
+
+typedef enum
+{
+    OUTPUT_TYPE_ID_VIDEO,
+    OUTPUT_TYPE_ID_AUDIO,
+    OUTPUT_TYPE_ID_IMAGE,
+    OUTPUT_TYPE_ID_DUMMY_LAST,
+} OutputTypeID;
+
+typedef enum
+{
+    FORMAT_VIDEO_ID_GIF,
+    FORMAT_VIDEO_ID_MKV,
+    FORMAT_VIDEO_ID_MOV,
+    FORMAT_VIDEO_ID_MP4,
+    FORMAT_VIDEO_ID_WEBM,
+    FORMAT_VIDEO_ID_DUMMY_LAST,
+} FormatVideoID;
+
+typedef enum
+{
+    FORMAT_AUDIO_ID_FLAC,
+    FORMAT_AUDIO_ID_M4A,
+    FORMAT_AUDIO_ID_MP3,
+    FORMAT_AUDIO_ID_OGG,
+    FORMAT_AUDIO_ID_OPUS,
+    FORMAT_AUDIO_ID_WAV,
+    FORMAT_AUDIO_ID_DUMMY_LAST,
+} FormatAudioID;
+
+typedef enum
+{
+    FORMAT_IMAGE_ID_JPEG,
+    FORMAT_IMAGE_ID_PNG,
+    FORMAT_IMAGE_ID_TIFF,
+    FORMAT_IMAGE_ID_WEBP,
+    FORMAT_IMAGE_ID_DUMMY_LAST,
+} FormatImageID;
 
 const Clay_Color COLOR_BG_MAIN = {50, 50, 50, 255};
 const Clay_Color COLOR_BG_SECTION = {70, 70, 70, 255};
@@ -96,9 +136,9 @@ const Clay_Color COLOR_BG_BUTTON_HOVERED = {110, 110, 110, 255};
 const Clay_Color COLOR_BG_BUTTON_DISABLED = {70, 70, 70, 255};
 const Clay_Color COLOR_BG_DROPDOWN = {90, 90, 90, 255};
 const Clay_Color COLOR_BG_DROPDOWN_HOVERED = {110, 110, 110, 255};
-const Clay_Color COLOR_BG_TAB = {70, 70, 70, 255};
+const Clay_Color COLOR_BG_TAB = {60, 60, 60, 255};
 const Clay_Color COLOR_BG_TAB_HOVERED = {110, 110, 110, 255};
-const Clay_Color COLOR_BG_TAB_SELECTED = {90, 90, 90, 255};
+const Clay_Color COLOR_BG_TAB_SELECTED = {80, 80, 80, 255};
 const Clay_Color COLOR_BG_TAB_DISABLED = {70, 70, 70, 255};
 
 const Clay_Color COLOR_BORDER_TEXTBOX = {150, 150, 150, 255};
@@ -139,9 +179,9 @@ typedef struct
 
 typedef struct
 {
-    TextboxBuffer *textboxBuffers;
-    bool *isInit;
-    bool *isDisabled;
+    TextboxBuffer textboxBuffers[TEXTBOX_ID_DUMMY_LAST];
+    bool isInit[TEXTBOX_ID_DUMMY_LAST];
+    bool isDisabled[TEXTBOX_ID_DUMMY_LAST];
     int hoveredTextbox;
     FocusData focusData;
     Vector2 minDimensions;
@@ -155,32 +195,45 @@ typedef struct
 
 typedef struct
 {
-    size_t *selectedOptions;
-    const char **selectedValues;
+    size_t selectedOptions[DROPDOWN_ID_DUMMY_LAST];
+    const char *selectedValues[DROPDOWN_ID_DUMMY_LAST];
+    bool isInit[DROPDOWN_ID_DUMMY_LAST];
     size_t hoveredOption;
     const char *hoveredValue;
-    bool *isInit;
 } DropdownData;
 
 typedef struct
 {
-    bool *isDisabled;
+    bool isDisabled[BUTTON_ID_DUMMY_LAST];
 } ButtonData;
 
 typedef struct
 {
     size_t selectedTab;
-    bool *isDisabled;
+    bool isDisabled[STREAM_ID_DUMMY_LAST];
 } TabData;
 
-TextboxBuffer textboxBuffers[TEXTBOX_ID_DUMMY_LAST] = {0};
-bool textboxIsInit[TEXTBOX_ID_DUMMY_LAST] = {0};
-bool textboxIsDisabled[TEXTBOX_ID_DUMMY_LAST] = {0};
+typedef struct
+{
+    const char *name;
+    const char *extensions;
+} FormatData;
+
+typedef struct
+{
+    char inputPath[TEXTBOX_BUFFER_SIZE];
+    size_t streamCounts[STREAM_ID_DUMMY_LAST];
+    cJSON *streams;
+} StreamData;
+
+// TextboxBuffer textboxBuffers[TEXTBOX_ID_DUMMY_LAST] = {0};
+// bool textboxIsInit[TEXTBOX_ID_DUMMY_LAST] = {0};
+// bool textboxIsDisabled[TEXTBOX_ID_DUMMY_LAST] = {0};
 
 TextboxData textboxData = {
-    .textboxBuffers = textboxBuffers,
-    .isInit = textboxIsInit,
-    .isDisabled = textboxIsDisabled,
+    // .textboxBuffers = textboxBuffers,
+    // .isInit = textboxIsInit,
+    // .isDisabled = textboxIsDisabled,
     .hoveredTextbox = -1,
     .focusData = {
         .focusRegistered = false,
@@ -188,35 +241,60 @@ TextboxData textboxData = {
     },
 };
 
-size_t dropdownSelectedOptions[DROPDOWN_ID_DUMMY_LAST] = {0};
-const char *dropdownSelectedValues[DROPDOWN_ID_DUMMY_LAST] = {0};
-bool dropdownIsInit[DROPDOWN_ID_DUMMY_LAST] = {0};
+// size_t dropdownSelectedOptions[DROPDOWN_ID_DUMMY_LAST] = {0};
+// const char *dropdownSelectedValues[DROPDOWN_ID_DUMMY_LAST] = {0};
+// bool dropdownIsInit[DROPDOWN_ID_DUMMY_LAST] = {0};
 
 DropdownData dropdownData = {
-    .selectedOptions = dropdownSelectedOptions,
-    .selectedValues = dropdownSelectedValues,
+    // .selectedOptions = dropdownSelectedOptions,
+    // .selectedValues = dropdownSelectedValues,
+    // .isInit = dropdownIsInit,
     .hoveredOption = 0,
     .hoveredValue = NULL,
-    .isInit = dropdownIsInit,
 };
 
-bool buttonIsDisabled[BUTTON_ID_DUMMY_LAST] = {0};
+// bool buttonIsDisabled[BUTTON_ID_DUMMY_LAST] = {0};
 
 ButtonData buttonData = {
-    .isDisabled = buttonIsDisabled,
+    0
+    // .isDisabled = buttonIsDisabled,
 };
 
-bool tabIsDisabled[TAB_ID_DUMMY_LAST] = {0};
+// bool tabIsDisabled[STREAM_ID_DUMMY_LAST] = {0};
 
 TabData tabData = {
-    .selectedTab = TAB_ID_VIDEO,
-    .isDisabled = tabIsDisabled,
+    .selectedTab = STREAM_ID_VIDEO,
+    // .isDisabled = tabIsDisabled,
 };
+
+FormatData formatVideoData[FORMAT_VIDEO_ID_DUMMY_LAST] = {
+    {.name = "GIF", .extensions = "gif"},
+    {.name = "MKV", .extensions = "mkv"},
+    {.name = "MOV", .extensions = "mov"},
+    {.name = "MP4", .extensions = "mp4"},
+    {.name = "WEBM", .extensions = "webm"},
+};
+
+FormatData formatAudioData[FORMAT_AUDIO_ID_DUMMY_LAST] = {
+    {.name = "FLAC", .extensions = "flac"},
+    {.name = "M4A", .extensions = "m4a"},
+    {.name = "MP3", .extensions = "mp3"},
+    {.name = "OGG", .extensions = "ogg,oga"},
+    {.name = "OPUS", .extensions = "opus"},
+    {.name = "WAV", .extensions = "wav,wave"},
+};
+
+FormatData formatImageData[FORMAT_IMAGE_ID_DUMMY_LAST] = {
+    {.name = "JPEG", .extensions = "jpg,jpeg,jpe,jfif"},
+    {.name = "PNG", .extensions = "png"},
+    {.name = "TIFF", .extensions = "tiff,tif"},
+    {.name = "WEBP", .extensions = "webp"},
+};
+
+StreamData streamData = {0};
 
 Clay_Padding defaultBoxPadding;
 Clay_CornerRadius defaultCornerRadius;
-
-size_t f = 0;
 
 const char *getTextboxValue(TextboxID textboxId)
 {
@@ -267,11 +345,11 @@ int convert()
         ERROR("Input file does not exist (\"%s\").", inputPath);
         return 1;
     }
-    if (!IsFileExtension(inputPath, getDropdownValue(DROPDOWN_ID_STREAM_TYPE)))
-    {
-        ERROR("Incorrect input file format (%s).", GetFileExtension(inputPath));
-        return 2;
-    }
+    // if (!IsFileExtension(inputPath, getDropdownValue(DROPDOWN_ID_STREAM_TYPE)))
+    // {
+    //     ERROR("Incorrect input file format (%s).", GetFileExtension(inputPath));
+    //     return 2;
+    // }
 
     // Validate output path
     const char *outputPath = getTextboxValue(TEXTBOX_ID_OUTPUT_PATH);
@@ -384,8 +462,8 @@ void HandleLoadInputButtonInteraction(
             return;
         }
 
-        ret = fread(buffer, 1, sizeof(buffer) - 1, fp);
-        if (ret < sizeof(buffer) - 1 && ferror(fp))
+        ret = fread(buffer, 1, sizeof(buffer), fp);
+        if (ret < sizeof(buffer) && ferror(fp))
         {
             ERROR("Failed to read command output.");
             return;
@@ -395,11 +473,71 @@ void HandleLoadInputButtonInteraction(
         if (json == NULL)
         {
             ERROR("Failed to parse output as JSON.");
+            const char *errorPtr = cJSON_GetErrorPtr();
+            if (errorPtr != NULL)
+            {
+                ERROR("Error before: %s", errorPtr);
+            }
+            pclose(fp);
             return;
         }
 
-        cJSON_PrintPreallocated(json, buffer, sizeof(buffer) - 5, cJSON_True);
-        LOG("JSON:\n%s", buffer);
+        // cJSON_PrintPreallocated(json, buffer, sizeof(buffer) - 5, cJSON_True);
+        // LOG("JSON:\n%s", buffer);
+
+        cJSON *streams = cJSON_GetObjectItemCaseSensitive(json, "streams");
+        if (streams == NULL)
+        {
+            ERROR("Failed to get streams object from JSON.");
+            cJSON_Delete(json);
+            pclose(fp);
+            return;
+        }
+
+        memset(&streamData, 0, sizeof(streamData));
+
+        cJSON *stream;
+        size_t i = 0;
+        cJSON_ArrayForEach(stream, streams)
+        {
+            cJSON *codecType = cJSON_GetObjectItemCaseSensitive(stream, "codec_type");
+            if (cJSON_IsString(codecType) && codecType->valuestring != NULL)
+            {
+                // LOG("codec_type = %s", codecType->valuestring);
+                if (strcmp(codecType->valuestring, "video") == 0)
+                {
+                    // LOG("Detected stream %d as video", i);
+                    streamData.streamCounts[STREAM_ID_VIDEO]++;
+                }
+                else if (strcmp(codecType->valuestring, "audio") == 0)
+                {
+                    // LOG("Detected stream %d as audio", i);
+                    streamData.streamCounts[STREAM_ID_AUDIO]++;
+                }
+                else if (strcmp(codecType->valuestring, "subtitle") == 0)
+                {
+                    // LOG("Detected stream %d as subtitle", i);
+                    streamData.streamCounts[STREAM_ID_SUBTITLE]++;
+                }
+            }
+            else
+            {
+                ERROR("Failed to read streams[%d]", i);
+            }
+
+            i++;
+        }
+        LOG("v: %zu, a: %zu, s: %zu", streamData.streamCounts[STREAM_ID_VIDEO], streamData.streamCounts[STREAM_ID_AUDIO], streamData.streamCounts[STREAM_ID_SUBTITLE]);
+
+        for (tabData.selectedTab = 0; tabData.selectedTab < STREAM_ID_DUMMY_LAST; tabData.selectedTab++)
+        {
+            if (!tabData.isDisabled[tabData.selectedTab])
+            {
+                break;
+            }
+        }
+
+        memcpy(&streamData.inputPath, getTextboxValue(TEXTBOX_ID_INPUT_PATH), TEXTBOX_BUFFER_SIZE);
 
         cJSON_Delete(json);
         pclose(fp);
@@ -719,7 +857,7 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
             CLAY({
                 .id = CLAY_IDI("DropdownButton", dropdownId),
                 .layout = {
-                    .sizing = CLAY_SIZING_GROW(0),
+                    .sizing = {.width = CLAY_SIZING_GROW(0)},
                     .padding = defaultBoxPadding,
                     .childAlignment = {.x = CLAY_ALIGN_X_CENTER},
                 },
@@ -823,15 +961,15 @@ void RenderButton(
     }
 }
 
-void RenderTab(Clay_String label, TabID tabId)
+void RenderTab(Clay_String label, StreamID streamId)
 {
     CLAY({
         .layout = {
             .padding = defaultBoxPadding,
         },
-        .backgroundColor = tabData.isDisabled[tabId] ? COLOR_BG_TAB_DISABLED : tabId == tabData.selectedTab ? COLOR_BG_TAB_SELECTED
-                                                                           : Clay_Hovered()                 ? COLOR_BG_TAB_HOVERED
-                                                                                                            : COLOR_BG_TAB,
+        .backgroundColor = tabData.isDisabled[streamId] ? COLOR_BG_TAB_DISABLED : streamId == tabData.selectedTab ? COLOR_BG_TAB_SELECTED
+                                                                              : Clay_Hovered()                    ? COLOR_BG_TAB_HOVERED
+                                                                                                                  : COLOR_BG_TAB,
         // .cornerRadius = (Clay_CornerRadius){16, 16, 0, 0},
         .border = {
             .color = COLOR_BORDER_TAB,
@@ -839,9 +977,9 @@ void RenderTab(Clay_String label, TabID tabId)
         },
     })
     {
-        Clay_OnHover(HandleTabInteraction, tabId);
+        Clay_OnHover(HandleTabInteraction, streamId);
 
-        CLAY_TEXT(label, tabData.isDisabled[tabId] ? TEXT_CONFIG_FAINT : TEXT_CONFIG_BOLD);
+        CLAY_TEXT(label, tabData.isDisabled[streamId] ? TEXT_CONFIG_FAINT : TEXT_CONFIG_BOLD);
     }
 }
 
@@ -905,13 +1043,13 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 .height = CLAY_SIZING_GROW(0),
             },
             .padding = CLAY_PADDING_ALL(16),
-            .childGap = 16,
+            // .childGap = 16,
         },
         .backgroundColor = COLOR_BG_MAIN,
     })
     {
         CLAY({
-            .id = CLAY_ID("LeftSectionContainer"),
+            .id = CLAY_ID("MainSectionContainer"),
             .layout = {
                 .sizing = {
                     .width = CLAY_SIZING_GROW(0),
@@ -923,31 +1061,12 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             },
             .backgroundColor = COLOR_BG_SECTION,
             .cornerRadius = CLAY_CORNER_RADIUS(16),
-            .clip = {
-                .vertical = true,
-                .childOffset = Clay_GetScrollOffset(),
-            },
+            // .clip = {
+            //     .vertical = true,
+            //     .childOffset = Clay_GetScrollOffset(),
+            // },
         })
         {
-            // CLAY({.layout = {.childGap = textboxData.minDimensions.x}})
-            // {
-            //     RenderDropdown(
-            //         CLAY_STRING("Stream Type:"),
-            //         DROPDOWN_ID_STREAM_TYPE,
-            //         (DropdownOption[]){
-            //             {"Video", "mp4,mov,mkv,webm,flv,mpeg,gif"},
-            //             DROPDOWN_OPTION_NULL,
-            //         });
-
-            //     RenderDropdown(
-            //         CLAY_STRING("to"),
-            //         DROPDOWN_ID_FORMAT_OUT,
-            //         (DropdownOption[]){
-            //             {"GIF", ".gif"},
-            //             DROPDOWN_OPTION_NULL,
-            //         });
-            // }
-
             CLAY({.layout = {.childGap = textboxData.minDimensions.x * 2}})
             {
                 CLAY({.layout = {.childGap = 4}})
@@ -974,6 +1093,32 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     0);
             }
 
+            CLAY({.layout = {.childGap = textboxData.minDimensions.x}})
+            {
+                RenderDropdown(
+                    CLAY_STRING("Output Type:"),
+                    DROPDOWN_ID_OUTPUT_TYPE,
+                    streamData.streamCounts[STREAM_ID_VIDEO] > 0   ? streamData.streamCounts[STREAM_ID_AUDIO] > 0 ? (DropdownOption[]){
+                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
+                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_AUDIO,
+                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
+                                                                                                                      DROPDOWN_OPTION_NULL,
+                                                                                                                  }
+                                                                                                                  : (DropdownOption[]){
+                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
+                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
+                                                                                                                      DROPDOWN_OPTION_NULL,
+                                                                                                                  }
+                      : streamData.streamCounts[STREAM_ID_AUDIO] > 0 ? (DropdownOption[]){
+                                                                         DROPDOWN_OPTION_OUTPUT_TYPE_AUDIO,
+                                                                         DROPDOWN_OPTION_NULL,
+                                                                     }
+                                                                   : (DropdownOption[]){
+                                                                         DROPDOWN_OPTION_UNSELECTED,
+                                                                         DROPDOWN_OPTION_NULL,
+                                                                     });
+            }
+
             CLAY({
                 .id = CLAY_ID("TabbedBox"),
                 .layout = {
@@ -992,13 +1137,13 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 {
                     RenderTab(
                         CLAY_STRING("Video"),
-                        TAB_ID_VIDEO);
+                        STREAM_ID_VIDEO);
                     RenderTab(
                         CLAY_STRING("Audio"),
-                        TAB_ID_AUDIO);
+                        STREAM_ID_AUDIO);
                     RenderTab(
                         CLAY_STRING("Subtitle"),
-                        TAB_ID_SUBTITLE);
+                        STREAM_ID_SUBTITLE);
 
                     CLAY({
                         .layout = {
@@ -1014,20 +1159,18 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                         },
                     })
                     {
-                        CLAY_TEXT(CLAY_STRING(" "), TEXT_CONFIG_DEFAULT);
                     }
                 }
 
                 CLAY({
                     .id = CLAY_ID("TabbedBoxContent"),
                     .layout = {
-                        .layoutDirection = CLAY_TOP_TO_BOTTOM,
                         .sizing = {
                             .width = CLAY_SIZING_GROW(0),
                             .height = CLAY_SIZING_GROW(0),
                         },
                         .padding = CLAY_PADDING_ALL(16),
-                        .childGap = textboxData.minDimensions.y,
+                        .childGap = 16,
                     },
                     .backgroundColor = COLOR_BG_TAB_SELECTED,
                     .cornerRadius = (Clay_CornerRadius){0, 0, 16, 16},
@@ -1037,55 +1180,196 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     },
                 })
                 {
-                    CLAY_TEXT(CLAY_STRING("TEST"), TEXT_CONFIG_DEFAULT);
+                    switch (tabData.selectedTab)
+                    {
+                    case STREAM_ID_VIDEO:
+                        CLAY({
+                            .id = CLAY_ID("TabbedBoxContentVideoLeft"),
+                            .layout = {
+                                .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                                // .sizing = {
+                                //     .width = CLAY_SIZING_GROW(0),
+                                //     .height = CLAY_SIZING_GROW(0),
+                                // },
+                                .padding = CLAY_PADDING_ALL(16),
+                                .childGap = textboxData.minDimensions.y,
+                            },
+                            // .backgroundColor = COLOR_BG_SECTION,
+                            // .cornerRadius = CLAY_CORNER_RADIUS(16),
+                        })
+                        {
+
+                            RenderTextbox(
+                                CLAY_STRING("FPS:"),
+                                TEXTBOX_ID_FPS,
+                                (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 1, .max = 60},
+                                false,
+                                2,
+                                "30");
+
+                            CLAY({.layout = {.childGap = textboxData.minDimensions.x}})
+                            {
+                                RenderTextbox(
+                                    CLAY_STRING("Duration:"),
+                                    TEXTBOX_ID_DURATION_START,
+                                    (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
+                                    false,
+                                    6,
+                                    "0.0");
+
+                                RenderTextbox(
+                                    CLAY_STRING("to"),
+                                    TEXTBOX_ID_DURATION_END,
+                                    (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
+                                    false,
+                                    6,
+                                    "");
+                            }
+
+                            RenderTextbox(
+                                CLAY_STRING("Speed:"),
+                                TEXTBOX_ID_SPEED,
+                                (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
+                                false,
+                                4,
+                                "1.0");
+                        }
+
+                        CLAY({
+                            .id = CLAY_ID("TabbedBoxContentVideoRight"),
+                            .layout = {
+                                .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                                // .sizing = {
+                                //     .width = CLAY_SIZING_GROW(0),
+                                //     .height = CLAY_SIZING_GROW(0),
+                                // },
+                                .padding = CLAY_PADDING_ALL(16),
+                                .childGap = textboxData.minDimensions.y,
+                            },
+                            // .backgroundColor = COLOR_BG_SECTION,
+                            // .cornerRadius = CLAY_CORNER_RADIUS(16),
+                        })
+                        {
+                            CLAY({
+                                .layout = {
+                                    .childGap = 12,
+                                    .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                                },
+                                .border = {
+                                    .color = COLOR_GRAY,
+                                    .width = (Clay_BorderWidth){0, 0, 0, 0, 1},
+                                },
+                            })
+                            {
+                                CLAY_TEXT(CLAY_STRING("Scale"), TEXT_CONFIG_BOLD);
+
+                                CLAY(0)
+                                {
+                                    RenderTextbox(
+                                        CLAY_STRING("    Width:"),
+                                        TEXTBOX_ID_SCALE_W,
+                                        (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                        false,
+                                        4,
+                                        "in_w");
+
+                                    RenderTextbox(
+                                        CLAY_STRING("    Height:"),
+                                        TEXTBOX_ID_SCALE_H,
+                                        (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                        false,
+                                        4,
+                                        "in_h");
+                                }
+                            }
+
+                            CLAY({
+                                .layout = {
+                                    .childGap = 12,
+                                    .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                                },
+                                .border = {
+                                    .color = COLOR_GRAY,
+                                    .width = (Clay_BorderWidth){0, 0, 0, 0, 1},
+                                },
+                            })
+                            {
+                                CLAY_TEXT(CLAY_STRING("Crop"), TEXT_CONFIG_BOLD);
+
+                                CLAY({
+                                    .layout = {
+                                        .childGap = 12,
+                                        .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                                    },
+                                })
+                                {
+                                    CLAY(0)
+                                    {
+                                        RenderTextbox(
+                                            CLAY_STRING("    Width:"),
+                                            TEXTBOX_ID_CROP_W,
+                                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                            false,
+                                            4,
+                                            "in_w");
+
+                                        RenderTextbox(
+                                            CLAY_STRING("    Height:"),
+                                            TEXTBOX_ID_CROP_H,
+                                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                            false,
+                                            4,
+                                            "in_h");
+                                    }
+
+                                    CLAY(0)
+                                    {
+                                        RenderTextbox(
+                                            CLAY_STRING(" x-offset:"),
+                                            TEXTBOX_ID_CROP_X,
+                                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                            false,
+                                            4,
+                                            "0");
+
+                                        RenderTextbox(
+                                            CLAY_STRING("  y-offset:"),
+                                            TEXTBOX_ID_CROP_Y,
+                                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                            false,
+                                            4,
+                                            "0");
+                                    }
+                                }
+                            }
+                        }
+                        break;
+
+                    case STREAM_ID_AUDIO:
+                        break;
+
+                    case STREAM_ID_SUBTITLE:
+                        break;
+
+                    case STREAM_ID_DUMMY_LAST:
+                        break;
+
+                    default:
+                        ERROR("Reached default case (TabbedBoxContent).");
+                        break;
+                    }
+                    // static char chars[] = "Number of streams: 0";
+                    // size_t length = strlen(chars);
+                    // chars[length - 1] = '0' + streamData.streamCounts[tabData.selectedTab];
+                    // Clay_String str = {
+                    //     .isStaticallyAllocated = false,
+                    //     .length = length,
+                    //     .chars = chars,
+                    // };
+                    // CLAY_TEXT(str, TEXT_CONFIG_DEFAULT);
+                    // CLAY_TEXT(CLAY_STRING("TEST"), TEXT_CONFIG_DEFAULT);
                 }
             }
-
-            RenderDropdown(
-                CLAY_STRING("TEST:"),
-                DROPDOWN_ID_FORMAT_OUT,
-                (DropdownOption[]){
-                    DROPDOWN_OPTION_UNSELECTED,
-                    {"Option 1", "1"},
-                    {"Option 2 skibidi", "2"},
-                    {"Option 3", "3"},
-                    DROPDOWN_OPTION_NULL,
-                });
-
-            RenderTextbox(
-                CLAY_STRING("FPS:"),
-                TEXTBOX_ID_FPS,
-                (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 1, .max = 60},
-                false,
-                2,
-                "30");
-
-            CLAY({.layout = {.childGap = textboxData.minDimensions.x}})
-            {
-                RenderTextbox(
-                    CLAY_STRING("Duration:"),
-                    TEXTBOX_ID_DURATION_START,
-                    (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
-                    false,
-                    6,
-                    "0.0");
-
-                RenderTextbox(
-                    CLAY_STRING("to"),
-                    TEXTBOX_ID_DURATION_END,
-                    (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
-                    false,
-                    6,
-                    "");
-            }
-
-            RenderTextbox(
-                CLAY_STRING("Speed:"),
-                TEXTBOX_ID_SPEED,
-                (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
-                false,
-                4,
-                "1.0");
 
             CLAY({.layout = {.childGap = 4}})
             {
@@ -1547,7 +1831,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         textboxData.focusData.focusIndex = -1;
     }
 
-    SetMouseCursor(textboxData.hoveredTextbox >= 0 && !textboxData.isDisabled[textboxData.focusData.focusIndex] ? MOUSE_CURSOR_IBEAM : MOUSE_CURSOR_DEFAULT);
+    SetMouseCursor(textboxData.hoveredTextbox >= 0 ? MOUSE_CURSOR_IBEAM : MOUSE_CURSOR_DEFAULT);
 
     return Clay_EndLayout();
 }
