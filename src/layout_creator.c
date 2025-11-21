@@ -91,6 +91,13 @@ typedef enum
 
 typedef enum
 {
+    SCROLL_ID_WINDOW,
+    SCROLL_ID_TABBEDBOXCONTENT,
+    SCROLL_ID_DUMMY_LAST,
+} ScrollID;
+
+typedef enum
+{
     OUTPUT_TYPE_ID_VIDEO,
     OUTPUT_TYPE_ID_AUDIO,
     OUTPUT_TYPE_ID_IMAGE,
@@ -130,16 +137,19 @@ typedef enum
 const Clay_Color COLOR_BG_MAIN = {50, 50, 50, 255};
 const Clay_Color COLOR_BG_SECTION = {70, 70, 70, 255};
 const Clay_Color COLOR_BG_TEXTBOX = {90, 90, 90, 255};
-const Clay_Color COLOR_BG_TEXTBOX_DISABLED = {70, 70, 70, 255};
+const Clay_Color COLOR_BG_TEXTBOX_DISABLED = {140, 140, 140, 255};
 const Clay_Color COLOR_BG_BUTTON = {90, 90, 90, 255};
 const Clay_Color COLOR_BG_BUTTON_HOVERED = {110, 110, 110, 255};
-const Clay_Color COLOR_BG_BUTTON_DISABLED = {70, 70, 70, 255};
+const Clay_Color COLOR_BG_BUTTON_DISABLED = {140, 140, 140, 255};
 const Clay_Color COLOR_BG_DROPDOWN = {90, 90, 90, 255};
 const Clay_Color COLOR_BG_DROPDOWN_HOVERED = {110, 110, 110, 255};
 const Clay_Color COLOR_BG_TAB = {60, 60, 60, 255};
 const Clay_Color COLOR_BG_TAB_HOVERED = {110, 110, 110, 255};
 const Clay_Color COLOR_BG_TAB_SELECTED = {80, 80, 80, 255};
-const Clay_Color COLOR_BG_TAB_DISABLED = {70, 70, 70, 255};
+const Clay_Color COLOR_BG_TAB_DISABLED = {140, 140, 140, 255};
+const Clay_Color COLOR_BG_SCROLLBAR = {200, 200, 200, 255};
+const Clay_Color COLOR_BG_THUMB = {140, 140, 140, 255};
+const Clay_Color COLOR_BG_THUMB_HOVERED = {120, 120, 120, 255};
 
 const Clay_Color COLOR_BORDER_TEXTBOX = {150, 150, 150, 255};
 const Clay_Color COLOR_BORDER_TEXTBOX_FOCUSED = {200, 200, 200, 255};
@@ -150,6 +160,7 @@ const Clay_Color COLOR_BORDER_TAB = {150, 150, 150, 255};
 const Clay_Color COLOR_TRANSPARENT = {0, 0, 0, 0};
 const Clay_Color COLOR_WHITE = {255, 255, 255, 255};
 const Clay_Color COLOR_BLACK = {0, 0, 0, 255};
+const Clay_Color COLOR_DARKGRAY = {80, 80, 80, 255};
 const Clay_Color COLOR_GRAY = {140, 140, 140, 255};
 const Clay_Color COLOR_LIGHTGRAY = {200, 200, 200, 255};
 
@@ -215,6 +226,11 @@ typedef struct
 
 typedef struct
 {
+    Clay_ScrollContainerData data[SCROLL_ID_DUMMY_LAST];
+    int scrolling;
+} ScrollData;
+typedef struct
+{
     const char *name;
     const char *extensions;
 } FormatData;
@@ -266,6 +282,11 @@ TabData tabData = {
     .selectedTab = STREAM_ID_VIDEO,
     // .isDisabled = tabIsDisabled,
 };
+
+ScrollData scrollData = {
+    .scrolling = -1,
+};
+// Clay_ScrollContainerData scrollData[SCROLL_ID_DUMMY_LAST] = {0};
 
 FormatData formatVideoData[FORMAT_VIDEO_ID_DUMMY_LAST] = {
     {.name = "GIF", .extensions = "gif"},
@@ -654,6 +675,34 @@ void HandleTabInteraction(
     }
 }
 
+void HandleThumbInteraction(
+    Clay_ElementId elementId,
+    Clay_PointerData pointerData,
+    intptr_t userData)
+{
+    if (pointerData.state == CLAY_POINTER_DATA_PRESSED)
+    {
+        size_t index = (size_t)userData;
+
+        Vector2 scrollDelta = GetMouseDelta();
+        scrollData.data->scrollPosition->y -= scrollDelta.y * scrollData.data->contentDimensions.height / scrollData.data->scrollContainerDimensions.height;
+        if (-scrollData.data->scrollPosition->y > scrollData.data->contentDimensions.height - scrollData.data->scrollContainerDimensions.height)
+        {
+            scrollData.data->scrollPosition->y = -(scrollData.data->contentDimensions.height - scrollData.data->scrollContainerDimensions.height);
+        }
+        if (scrollData.data->scrollPosition->y > 0)
+        {
+            scrollData.data->scrollPosition->y = 0;
+        }
+
+        scrollData.scrolling = index;
+    }
+    else if (pointerData.state == CLAY_POINTER_DATA_RELEASED)
+    {
+        scrollData.scrolling = -1;
+    }
+}
+
 void RenderTextbox(
     Clay_String label,
     TextboxID textboxId,
@@ -983,6 +1032,64 @@ void RenderTab(Clay_String label, StreamID streamId)
     }
 }
 
+void RenderScrollBar(ScrollID scrollId)
+{
+    CLAY({
+        .layout = {
+            .sizing = {
+                .width = 16,
+                .height = scrollData.data[scrollId].scrollContainerDimensions.height,
+            }},
+        .backgroundColor = COLOR_BG_SCROLLBAR,
+        .cornerRadius = CLAY_CORNER_RADIUS(8),
+        .floating = {
+            .attachPoints = {
+                .element = CLAY_ATTACH_POINT_RIGHT_TOP,
+                .parent = CLAY_ATTACH_POINT_RIGHT_TOP,
+            },
+            .attachTo = CLAY_ATTACH_TO_PARENT,
+        },
+    })
+    {
+        CLAY({
+            .layout = {
+                .sizing = {
+                    .width = 16,
+                    .height = (scrollData.data[scrollId].scrollContainerDimensions.height / scrollData.data[scrollId].contentDimensions.height) * scrollData.data[scrollId].scrollContainerDimensions.height,
+                },
+            },
+            .backgroundColor = Clay_Hovered() ? COLOR_BG_THUMB_HOVERED : COLOR_BG_THUMB,
+            .cornerRadius = CLAY_CORNER_RADIUS(8),
+            .floating = {
+                .offset = (Clay_Vector2){0, -scrollData.data[scrollId].scrollPosition->y * scrollData.data[scrollId].scrollContainerDimensions.height / scrollData.data[scrollId].contentDimensions.height},
+                .attachTo = CLAY_ATTACH_TO_PARENT,
+            },
+        })
+        {
+            Clay_OnHover(HandleThumbInteraction, scrollId);
+        }
+
+        if (scrollData.scrolling == scrollId)
+        {
+            CLAY({
+                .layout = {
+                    .sizing = {
+                        .width = CLAY_SIZING_GROW(0),
+                        .height = CLAY_SIZING_GROW(0),
+                    },
+                },
+                // .backgroundColor = (Clay_Color){255, 255, 255, 30},
+                .floating = {
+                    .attachTo = CLAY_ATTACH_TO_ROOT,
+                },
+            })
+            {
+                Clay_OnHover(HandleThumbInteraction, scrollId);
+            }
+        }
+    }
+}
+
 void LayoutCreator_Initialize(Font defaultFont)
 {
     textboxData.minDimensions = MeasureTextEx(defaultFont, "1", 16, 0);
@@ -1035,6 +1142,9 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
     textboxData.hoveredTextbox = -1;
     textboxData.focusData.focusRegistered = false;
 
+    scrollData.data[SCROLL_ID_WINDOW] = Clay_GetScrollContainerData(CLAY_ID("WindowContainer"));
+    bool scrollingWindow = scrollData.data[SCROLL_ID_WINDOW].found && scrollData.data[SCROLL_ID_WINDOW].scrollContainerDimensions.height != scrollData.data[SCROLL_ID_WINDOW].contentDimensions.height;
+
     CLAY({
         .id = CLAY_ID("WindowContainer"),
         .layout = {
@@ -1042,10 +1152,13 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 .width = CLAY_SIZING_GROW(0),
                 .height = CLAY_SIZING_GROW(0),
             },
-            .padding = CLAY_PADDING_ALL(16),
-            // .childGap = 16,
+            .padding = scrollingWindow ? (Clay_Padding){16, 32, 16, 16} : CLAY_PADDING_ALL(16),
         },
         .backgroundColor = COLOR_BG_MAIN,
+        .clip = {
+            .vertical = true,
+            .childOffset = Clay_GetScrollOffset(),
+        },
     })
     {
         CLAY({
@@ -1061,10 +1174,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             },
             .backgroundColor = COLOR_BG_SECTION,
             .cornerRadius = CLAY_CORNER_RADIUS(16),
-            // .clip = {
-            //     .vertical = true,
-            //     .childOffset = Clay_GetScrollOffset(),
-            // },
         })
         {
             CLAY({.layout = {.childGap = textboxData.minDimensions.x * 2}})
@@ -1165,6 +1274,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 CLAY({
                     .id = CLAY_ID("TabbedBoxContent"),
                     .layout = {
+                        .layoutDirection = CLAY_TOP_TO_BOTTOM,
                         .sizing = {
                             .width = CLAY_SIZING_GROW(0),
                             .height = CLAY_SIZING_GROW(0),
@@ -1178,103 +1288,128 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                         .color = COLOR_BORDER_TAB,
                         .width = (Clay_BorderWidth){1, 1, 0, 1, 0},
                     },
+                    .clip = {
+                        .vertical = true,
+                        .horizontal = true,
+                        .childOffset = Clay_GetScrollOffset(),
+                    },
                 })
                 {
                     switch (tabData.selectedTab)
                     {
                     case STREAM_ID_VIDEO:
-                        CLAY({
-                            .id = CLAY_ID("TabbedBoxContentVideoLeft"),
-                            .layout = {
-                                .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                                // .sizing = {
-                                //     .width = CLAY_SIZING_GROW(0),
-                                //     .height = CLAY_SIZING_GROW(0),
-                                // },
-                                .padding = CLAY_PADDING_ALL(16),
-                                .childGap = textboxData.minDimensions.y,
-                            },
-                            // .backgroundColor = COLOR_BG_SECTION,
-                            // .cornerRadius = CLAY_CORNER_RADIUS(16),
-                        })
+                        // CLAY({
+                        //     .id = CLAY_ID("TabbedBoxContentVideoLeft"),
+                        //     .layout = {
+                        //         // .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                        //         // .sizing = {
+                        //         //     .width = CLAY_SIZING_GROW(0),
+                        //         //     .height = CLAY_SIZING_GROW(0),
+                        //         // },
+                        //         .padding = CLAY_PADDING_ALL(16),
+                        //         .childGap = textboxData.minDimensions.y,
+                        //     },
+                        //     // .backgroundColor = COLOR_BG_SECTION,
+                        //     // .cornerRadius = CLAY_CORNER_RADIUS(16),
+                        // })
+                        // {
+
+                        RenderTextbox(
+                            CLAY_STRING("FPS:"),
+                            TEXTBOX_ID_FPS,
+                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 1, .max = 60},
+                            false,
+                            2,
+                            "30");
+
+                        CLAY({.layout = {.childGap = textboxData.minDimensions.x}})
                         {
+                            RenderTextbox(
+                                CLAY_STRING("Duration:"),
+                                TEXTBOX_ID_DURATION_START,
+                                (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
+                                false,
+                                6,
+                                "0.0");
 
                             RenderTextbox(
-                                CLAY_STRING("FPS:"),
-                                TEXTBOX_ID_FPS,
-                                (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 1, .max = 60},
+                                CLAY_STRING("to"),
+                                TEXTBOX_ID_DURATION_END,
+                                (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
                                 false,
-                                2,
-                                "30");
-
-                            CLAY({.layout = {.childGap = textboxData.minDimensions.x}})
-                            {
-                                RenderTextbox(
-                                    CLAY_STRING("Duration:"),
-                                    TEXTBOX_ID_DURATION_START,
-                                    (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
-                                    false,
-                                    6,
-                                    "0.0");
-
-                                RenderTextbox(
-                                    CLAY_STRING("to"),
-                                    TEXTBOX_ID_DURATION_END,
-                                    (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
-                                    false,
-                                    6,
-                                    "");
-                            }
-
-                            RenderTextbox(
-                                CLAY_STRING("Speed:"),
-                                TEXTBOX_ID_SPEED,
-                                (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
-                                false,
-                                4,
-                                "1.0");
+                                6,
+                                "");
                         }
 
+                        RenderTextbox(
+                            CLAY_STRING("Speed:"),
+                            TEXTBOX_ID_SPEED,
+                            (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
+                            false,
+                            4,
+                            "1.0");
+
                         CLAY({
-                            .id = CLAY_ID("TabbedBoxContentVideoRight"),
                             .layout = {
                                 .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                                // .sizing = {
-                                //     .width = CLAY_SIZING_GROW(0),
-                                //     .height = CLAY_SIZING_GROW(0),
-                                // },
-                                .padding = CLAY_PADDING_ALL(16),
-                                .childGap = textboxData.minDimensions.y,
+                                .sizing = {
+                                    .width = {.size = {300}},
+                                },
+                                .childGap = 12,
                             },
-                            // .backgroundColor = COLOR_BG_SECTION,
-                            // .cornerRadius = CLAY_CORNER_RADIUS(16),
+                            .border = {
+                                .color = COLOR_GRAY,
+                                .width = (Clay_BorderWidth){0, 0, 0, 0, 1},
+                            },
                         })
                         {
+                            CLAY_TEXT(CLAY_STRING("Scale"), TEXT_CONFIG_BOLD);
+
                             CLAY({
                                 .layout = {
-                                    .childGap = 12,
-                                    .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                                },
-                                .border = {
-                                    .color = COLOR_GRAY,
-                                    .width = (Clay_BorderWidth){0, 0, 0, 0, 1},
+                                    .sizing = {
+                                        .width = CLAY_SIZING_GROW(0),
+                                    },
                                 },
                             })
                             {
-                                CLAY_TEXT(CLAY_STRING("Scale"), TEXT_CONFIG_BOLD);
-
-                                CLAY(0)
+                                CLAY({
+                                    .layout = {
+                                        .sizing = {
+                                            .width = CLAY_SIZING_GROW(0),
+                                        },
+                                        .childAlignment = {
+                                            .x = CLAY_ALIGN_X_RIGHT,
+                                        },
+                                    },
+                                    .border = {
+                                        .color = COLOR_GRAY,
+                                        .width = CLAY_BORDER_OUTSIDE(1),
+                                    },
+                                })
                                 {
                                     RenderTextbox(
-                                        CLAY_STRING("    Width:"),
+                                        CLAY_STRING("Width:"),
                                         TEXTBOX_ID_SCALE_W,
                                         (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
                                         false,
                                         4,
                                         "in_w");
+                                }
 
+                                CLAY({
+                                    .layout = {
+                                        .sizing = {
+                                            .width = CLAY_SIZING_GROW(0),
+                                        },
+                                        .childAlignment = {
+                                            .x = CLAY_ALIGN_X_RIGHT,
+                                        },
+                                    },
+                                })
+                                {
                                     RenderTextbox(
-                                        CLAY_STRING("    Height:"),
+                                        CLAY_STRING("Height:"),
                                         TEXTBOX_ID_SCALE_H,
                                         (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
                                         false,
@@ -1282,67 +1417,85 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                         "in_h");
                                 }
                             }
+                        }
+
+                        CLAY({
+                            .layout = {
+                                .childGap = 12,
+                                .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                            },
+                            .border = {
+                                .color = COLOR_GRAY,
+                                .width = (Clay_BorderWidth){0, 0, 0, 0, 1},
+                            },
+                        })
+                        {
+                            CLAY_TEXT(CLAY_STRING("Crop"), TEXT_CONFIG_BOLD);
 
                             CLAY({
                                 .layout = {
                                     .childGap = 12,
                                     .layoutDirection = CLAY_TOP_TO_BOTTOM,
                                 },
-                                .border = {
-                                    .color = COLOR_GRAY,
-                                    .width = (Clay_BorderWidth){0, 0, 0, 0, 1},
-                                },
                             })
                             {
-                                CLAY_TEXT(CLAY_STRING("Crop"), TEXT_CONFIG_BOLD);
-
-                                CLAY({
-                                    .layout = {
-                                        .childGap = 12,
-                                        .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                                    },
-                                })
+                                CLAY(0)
                                 {
-                                    CLAY(0)
-                                    {
-                                        RenderTextbox(
-                                            CLAY_STRING("    Width:"),
-                                            TEXTBOX_ID_CROP_W,
-                                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-                                            false,
-                                            4,
-                                            "in_w");
+                                    RenderTextbox(
+                                        CLAY_STRING("    Width:"),
+                                        TEXTBOX_ID_CROP_W,
+                                        (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                        false,
+                                        4,
+                                        "in_w");
 
-                                        RenderTextbox(
-                                            CLAY_STRING("    Height:"),
-                                            TEXTBOX_ID_CROP_H,
-                                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-                                            false,
-                                            4,
-                                            "in_h");
-                                    }
+                                    RenderTextbox(
+                                        CLAY_STRING("    Height:"),
+                                        TEXTBOX_ID_CROP_H,
+                                        (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                        false,
+                                        4,
+                                        "in_h");
+                                }
 
-                                    CLAY(0)
-                                    {
-                                        RenderTextbox(
-                                            CLAY_STRING(" x-offset:"),
-                                            TEXTBOX_ID_CROP_X,
-                                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-                                            false,
-                                            4,
-                                            "0");
+                                CLAY(0)
+                                {
+                                    RenderTextbox(
+                                        CLAY_STRING(" x-offset:"),
+                                        TEXTBOX_ID_CROP_X,
+                                        (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                        false,
+                                        4,
+                                        "0");
 
-                                        RenderTextbox(
-                                            CLAY_STRING("  y-offset:"),
-                                            TEXTBOX_ID_CROP_Y,
-                                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-                                            false,
-                                            4,
-                                            "0");
-                                    }
+                                    RenderTextbox(
+                                        CLAY_STRING("  y-offset:"),
+                                        TEXTBOX_ID_CROP_Y,
+                                        (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                        false,
+                                        4,
+                                        "0");
                                 }
                             }
                         }
+                        // }
+
+                        // CLAY({
+                        //     .id = CLAY_ID("TabbedBoxContentVideoRight"),
+                        //     .layout = {
+                        //         .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                        //         // .sizing = {
+                        //         //     .width = CLAY_SIZING_GROW(0),
+                        //         //     .height = CLAY_SIZING_GROW(0),
+                        //         // },
+                        //         .padding = CLAY_PADDING_ALL(16),
+                        //         .childGap = textboxData.minDimensions.y,
+                        //     },
+                        //     // .backgroundColor = COLOR_BG_SECTION,
+                        //     // .cornerRadius = CLAY_CORNER_RADIUS(16),
+                        // })
+                        // {
+                        // }
                         break;
 
                     case STREAM_ID_AUDIO:
@@ -1358,16 +1511,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                         ERROR("Reached default case (TabbedBoxContent).");
                         break;
                     }
-                    // static char chars[] = "Number of streams: 0";
-                    // size_t length = strlen(chars);
-                    // chars[length - 1] = '0' + streamData.streamCounts[tabData.selectedTab];
-                    // Clay_String str = {
-                    //     .isStaticallyAllocated = false,
-                    //     .length = length,
-                    //     .chars = chars,
-                    // };
-                    // CLAY_TEXT(str, TEXT_CONFIG_DEFAULT);
-                    // CLAY_TEXT(CLAY_STRING("TEST"), TEXT_CONFIG_DEFAULT);
                 }
             }
 
@@ -1395,118 +1538,13 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 0);
         }
 
-        // CLAY({
-        //     .id = CLAY_ID("RightSectionContainer"),
-        //     .layout = {
-        //         .padding = CLAY_PADDING_ALL(16),
-        //         .childGap = textboxData.minDimensions.y,
-        //         .layoutDirection = CLAY_TOP_TO_BOTTOM,
-        //     },
-        //     .backgroundColor = COLOR_BG_SECTION,
-        //     .cornerRadius = CLAY_CORNER_RADIUS(16),
-        //     .clip = {
-        //         .vertical = true,
-        //         .childOffset = Clay_GetScrollOffset(),
-        //     },
-        // })
-        // {
-        //     // CLAY_TEXT(CLAY_STRING("Preview"), TEXT_CONFIG_BOLD);
-
-        //     CLAY({
-        //         .layout = {
-        //             .childGap = 12,
-        //             .layoutDirection = CLAY_TOP_TO_BOTTOM,
-        //         },
-        //         .border = {
-        //             .color = COLOR_GRAY,
-        //             .width = (Clay_BorderWidth){0, 0, 0, 0, 1},
-        //         },
-        //     })
-        //     {
-        //         CLAY_TEXT(CLAY_STRING("Scale"), TEXT_CONFIG_BOLD);
-
-        //         CLAY(0)
-        //         {
-        //             RenderTextbox(
-        //                 CLAY_STRING("    Width:"),
-        //                 TEXTBOX_ID_SCALE_W,
-        //                 (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-        //                 false,
-        //                 4,
-        //                 "in_w");
-
-        //             RenderTextbox(
-        //                 CLAY_STRING("    Height:"),
-        //                 TEXTBOX_ID_SCALE_H,
-        //                 (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-        //                 false,
-        //                 4,
-        //                 "in_h");
-        //         }
-        //     }
-
-        //     CLAY({
-        //         .layout = {
-        //             .childGap = 12,
-        //             .layoutDirection = CLAY_TOP_TO_BOTTOM,
-        //         },
-        //         .border = {
-        //             .color = COLOR_GRAY,
-        //             .width = (Clay_BorderWidth){0, 0, 0, 0, 1},
-        //         },
-        //     })
-        //     {
-        //         CLAY_TEXT(CLAY_STRING("Crop"), TEXT_CONFIG_BOLD);
-
-        //         CLAY({
-        //             .layout = {
-        //                 .childGap = 12,
-        //                 .layoutDirection = CLAY_TOP_TO_BOTTOM,
-        //             },
-        //         })
-        //         {
-        //             CLAY(0)
-        //             {
-        //                 RenderTextbox(
-        //                     CLAY_STRING("    Width:"),
-        //                     TEXTBOX_ID_CROP_W,
-        //                     (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-        //                     false,
-        //                     4,
-        //                     "in_w");
-
-        //                 RenderTextbox(
-        //                     CLAY_STRING("    Height:"),
-        //                     TEXTBOX_ID_CROP_H,
-        //                     (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-        //                     false,
-        //                     4,
-        //                     "in_h");
-        //             }
-
-        //             CLAY(0)
-        //             {
-        //                 RenderTextbox(
-        //                     CLAY_STRING(" x-offset:"),
-        //                     TEXTBOX_ID_CROP_X,
-        //                     (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-        //                     false,
-        //                     4,
-        //                     "0");
-
-        //                 RenderTextbox(
-        //                     CLAY_STRING("  y-offset:"),
-        //                     TEXTBOX_ID_CROP_Y,
-        //                     (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-        //                     false,
-        //                     4,
-        //                     "0");
-        //             }
-        //         }
-        //     }
-        // }
+        if (scrollingWindow)
+        {
+            RenderScrollBar(SCROLL_ID_WINDOW);
+        }
     }
 
+    // Handle drag-and-dropped files
     if (IsFileDropped())
     {
         FilePathList pathList = LoadDroppedFiles();
@@ -1534,7 +1572,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
     }
 
     TextboxBuffer *buffer;
-
     if (textboxData.focusData.focusIndex >= 0)
     {
         buffer = &textboxData.textboxBuffers[textboxData.focusData.focusIndex];
