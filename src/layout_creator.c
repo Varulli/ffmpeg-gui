@@ -88,10 +88,11 @@ typedef enum
 
 typedef enum
 {
-    BUTTON_ID_CONVERT,
     BUTTON_ID_BROWSE_INPUT,
     BUTTON_ID_LOAD_INPUT,
+    BUTTON_ID_LOAD_PREVIEW,
     BUTTON_ID_BROWSE_OUTPUT,
+    BUTTON_ID_CONVERT,
     BUTTON_ID_DUMMY_LAST
 } ButtonID;
 
@@ -1464,8 +1465,8 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                                 TEXTBOX_ID_SCALE_W,
                                                 (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
                                                 false,
-                                                4,
-                                                "in_w");
+                                                6,
+                                                textboxData.textboxBuffers[TEXTBOX_ID_SCALE_H].chars[0] == '\0' ? "in_w" : "-1");
                                         }
                                     }
                                     CLAY(styleFilterItem)
@@ -1481,8 +1482,8 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                                 TEXTBOX_ID_SCALE_H,
                                                 (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
                                                 false,
-                                                4,
-                                                "in_h");
+                                                6,
+                                                textboxData.textboxBuffers[TEXTBOX_ID_SCALE_W].chars[0] == '\0' ? "in_h" : "-1");
                                         }
                                     }
                                 }
@@ -1507,7 +1508,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                                 TEXTBOX_ID_CROP_W,
                                                 (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
                                                 false,
-                                                4,
+                                                6,
                                                 "in_w");
                                         }
                                     }
@@ -1524,7 +1525,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                                 TEXTBOX_ID_CROP_H,
                                                 (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
                                                 false,
-                                                4,
+                                                6,
                                                 "in_h");
                                         }
                                     }
@@ -1541,7 +1542,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                                 TEXTBOX_ID_CROP_X,
                                                 (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
                                                 false,
-                                                4,
+                                                6,
                                                 "0");
                                         }
                                     }
@@ -1558,7 +1559,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                                 TEXTBOX_ID_CROP_Y,
                                                 (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
                                                 false,
-                                                4,
+                                                6,
                                                 "0");
                                         }
                                     }
@@ -1653,13 +1654,14 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                         }
                                         CLAY(styleFilterItemField)
                                         {
+                                            const char *speedAudio = textboxData.textboxBuffers[TEXTBOX_ID_SPEED_AUDIO].chars;
                                             RenderTextbox(
                                                 CLAY_STRING(""),
                                                 TEXTBOX_ID_SPEED_VIDEO,
                                                 (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
                                                 false,
                                                 4,
-                                                "1.0");
+                                                speedAudio[0] == '\0' ? "1.0" : speedAudio);
                                         }
                                     }
                                 }
@@ -1763,13 +1765,14 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                         }
                                         CLAY(styleFilterItemField)
                                         {
+                                            const char *speedVideo = textboxData.textboxBuffers[TEXTBOX_ID_SPEED_VIDEO].chars;
                                             RenderTextbox(
                                                 CLAY_STRING(""),
                                                 TEXTBOX_ID_SPEED_AUDIO,
                                                 (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
                                                 false,
                                                 4,
-                                                "1.0");
+                                                speedVideo[0] == '\0' ? "1.0" : speedVideo);
                                         }
                                     }
                                 }
