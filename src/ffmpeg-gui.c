@@ -5,7 +5,7 @@
 
 void HandleClayErrors(Clay_ErrorData errorData)
 {
-    printf("%s", errorData.errorText.chars);
+    ERROR("%s", errorData.errorText.chars);
 }
 
 Clay_RenderCommandArray CreateLayout(Clay_Context *context)
@@ -33,8 +33,8 @@ int main(void)
     Clay_Raylib_Initialize(1000, 600, "ffmpeg GUI", FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT); // Extra parameters to this function are new since the video was published
 
     Font fonts[FONT_ID_DUMMY_LAST];
-    fonts[FONT_ID_BODY_16] = LoadFontEx("resources/consolas.ttf", 16, NULL, 400);
-    fonts[FONT_ID_BOLD_16] = LoadFontEx("resources/consolas-bold.ttf", 16, NULL, 400);
+    fonts[FONT_ID_BODY_16] = LoadFontEx("resources/consolas.ttf", 16, NULL, 200);
+    fonts[FONT_ID_BOLD_16] = LoadFontEx("resources/consolas-bold.ttf", 16, NULL, 200);
     for (size_t i = 0; i < FONT_ID_DUMMY_LAST; i++)
     {
         SetTextureFilter(fonts[i].texture, TEXTURE_FILTER_BILINEAR);
