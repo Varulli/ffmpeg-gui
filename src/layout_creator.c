@@ -14,6 +14,9 @@
 #define TEXTBOX_BUFFER_SIZE 256
 #define FLOAT_MAX 1e5f
 
+#define CHAR_W 8
+#define CHAR_H 16
+
 #define TEXT_CONFIG_DEFAULT CLAY_TEXT_CONFIG({ \
     .fontId = FONT_ID_BODY_16,                 \
     .fontSize = 16,                            \
@@ -61,7 +64,7 @@ typedef enum
     TEXTBOX_ID_FPS,
     TEXTBOX_ID_DURATION_START,
     TEXTBOX_ID_DURATION_END,
-    TEXTBOX_ID_SPEED,
+    TEXTBOX_ID_SPEED_VIDEO,
     TEXTBOX_ID_SCALE_W,
     TEXTBOX_ID_SCALE_H,
     TEXTBOX_ID_CROP_W,
@@ -69,15 +72,17 @@ typedef enum
     TEXTBOX_ID_CROP_X,
     TEXTBOX_ID_CROP_Y,
     TEXTBOX_ID_VOLUME,
+    TEXTBOX_ID_SPEED_AUDIO,
+    TEXTBOX_ID_DELAY,
     TEXTBOX_ID_OUTPUT_PATH,
     TEXTBOX_ID_DUMMY_LAST
 } TextboxID;
 
 typedef enum
 {
-    DROPDOWN_ID_TEST,
     DROPDOWN_ID_OUTPUT_TYPE,
     DROPDOWN_ID_LOUDNORM_ENABLE,
+    DROPDOWN_ID_CHANNEL_LAYOUT,
     DROPDOWN_ID_DUMMY_LAST
 } DropdownID;
 
@@ -213,7 +218,6 @@ typedef struct
     // bool isDisabled[TEXTBOX_ID_DUMMY_LAST];
     int hoveredTextbox;
     FocusData focusData;
-    Vector2 minDimensions;
 } TextboxData;
 
 typedef struct
@@ -310,9 +314,90 @@ FormatData formatImageData[FORMAT_IMAGE_ID_DUMMY_LAST] = {
 
 StreamData streamData = {0};
 
-Clay_Padding defaultBoxPadding;
-Clay_Padding buttonPadding;
-Clay_Padding dropdownPadding;
+Clay_Padding defaultBoxPadding = {
+    CHAR_W,
+    CHAR_W,
+    CHAR_H / 4,
+    CHAR_H / 4,
+};
+
+Clay_Padding buttonPadding = {
+    CHAR_W * 3,
+    CHAR_W * 3,
+    CHAR_H / 4,
+    CHAR_H / 4,
+};
+
+Clay_Padding dropdownPadding = {
+    0,
+    0,
+    CHAR_H / 4,
+    CHAR_H / 4,
+};
+
+Clay_ElementDeclaration styleFilters = {
+    .layout = {
+        .layoutDirection = CLAY_TOP_TO_BOTTOM,
+        .sizing = {
+            .width = CLAY_SIZING_GROW(0),
+        },
+        .childGap = 20,
+    },
+};
+
+Clay_ElementDeclaration styleFilterGroup = {
+    .layout = {
+        .layoutDirection = CLAY_TOP_TO_BOTTOM,
+        .sizing = {
+            .width = CLAY_SIZING_GROW(0, 250),
+        },
+        .childGap = 12,
+    },
+    .border = {
+        .color = COLOR_GRAY,
+        .width = (Clay_BorderWidth){0, 0, 0, 0, 1},
+    },
+};
+
+Clay_ElementDeclaration styleFilterItemGroup = {
+    .layout = {
+        .layoutDirection = CLAY_TOP_TO_BOTTOM,
+        .sizing = {
+            .width = CLAY_SIZING_GROW(0),
+        },
+        .childGap = 8,
+    },
+};
+
+Clay_ElementDeclaration styleFilterItem = {
+    .layout = {
+        .sizing = {
+            .width = CLAY_SIZING_GROW(0),
+        },
+        .childGap = 8,
+    },
+};
+
+Clay_ElementDeclaration styleFilterItemLabel = {
+    .layout = {
+        .sizing = {
+            .width = CLAY_SIZING_GROW(0),
+            .height = CLAY_SIZING_GROW(0),
+        },
+        .childAlignment = {
+            .x = CLAY_ALIGN_X_RIGHT,
+            .y = CLAY_ALIGN_X_CENTER,
+        },
+    },
+};
+
+Clay_ElementDeclaration styleFilterItemField = {
+    .layout = {
+        .sizing = {
+            .width = CLAY_SIZING_GROW(0),
+        },
+    },
+};
 
 const char *getTextboxValue(TextboxID textboxId)
 {
@@ -404,7 +489,7 @@ int convert()
         getTextboxValue(TEXTBOX_ID_FPS),
         getTextboxValue(TEXTBOX_ID_DURATION_START),
         getTextboxValue(TEXTBOX_ID_DURATION_END),
-        getTextboxValue(TEXTBOX_ID_SPEED),
+        getTextboxValue(TEXTBOX_ID_SPEED_VIDEO),
         getTextboxValue(TEXTBOX_ID_SCALE_W),
         getTextboxValue(TEXTBOX_ID_SCALE_H),
         getTextboxValue(TEXTBOX_ID_CROP_W),
@@ -545,19 +630,6 @@ void HandleLoadInputButtonInteraction(
             i++;
         }
         LOG("v: %zu, a: %zu, s: %zu", streamData.streamCounts[STREAM_ID_VIDEO], streamData.streamCounts[STREAM_ID_AUDIO], streamData.streamCounts[STREAM_ID_SUBTITLES]);
-
-        // tabData.isDisabled[TAB_ID_DIMENSIONS] = streamData.streamCounts[STREAM_ID_VIDEO] == 0;
-        // tabData.isDisabled[TAB_ID_VIDEO] = streamData.streamCounts[STREAM_ID_VIDEO] == 0;
-        // tabData.isDisabled[TAB_ID_AUDIO] = streamData.streamCounts[STREAM_ID_AUDIO] == 0;
-        // tabData.isDisabled[TAB_ID_SUBTITLES] = streamData.streamCounts[STREAM_ID_SUBTITLES] == 0;
-
-        // for (tabData.selectedTab = 0; tabData.selectedTab < TAB_ID_DUMMY_LAST; tabData.selectedTab++)
-        // {
-        //     if (!tabData.isDisabled[tabData.selectedTab])
-        //     {
-        //         break;
-        //     }
-        // }
 
         memcpy(&streamData.inputPath, getTextboxValue(TEXTBOX_ID_INPUT_PATH), TEXTBOX_BUFFER_SIZE);
 
@@ -724,7 +796,7 @@ void RenderTextbox(
     CLAY({
         .id = CLAY_IDI("Textbox", textboxId),
         .layout = {
-            .childGap = textboxData.minDimensions.x,
+            .childGap = CHAR_W,
             .childAlignment = {.y = CLAY_ALIGN_Y_CENTER},
         },
     })
@@ -741,7 +813,7 @@ void RenderTextbox(
                     .width = {
                         .size = {
                             .minMax = {
-                                .min = textboxData.minDimensions.x * (maxCharsDisplayed + 2),
+                                .min = CHAR_W * (maxCharsDisplayed + 2),
                             },
                         },
                     },
@@ -774,6 +846,8 @@ void RenderTextbox(
 
                 if (buffer->length == 0)
                 {
+                    CLAY_TEXT(CLAY_STRING(""), TEXT_CONFIG_DEFAULT);
+
                     size_t defaultLength = strlen(charsDefault);
                     if (defaultLength > 0)
                     {
@@ -786,7 +860,6 @@ void RenderTextbox(
                     }
                     else
                     {
-                        CLAY_TEXT(CLAY_STRING(""), TEXT_CONFIG_DEFAULT);
                         CLAY_TEXT(CLAY_STRING(" "), TEXT_CONFIG_DEFAULT);
                     }
                 }
@@ -862,7 +935,7 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
     CLAY({
         .id = CLAY_IDI("Dropdown", dropdownId),
         .layout = {
-            .childGap = textboxData.minDimensions.x,
+            .childGap = CHAR_W,
             .childAlignment = {.y = CLAY_ALIGN_Y_CENTER},
         },
     })
@@ -888,11 +961,11 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
 
         // Clay_Sizing dropdownSizing = {.width = {
         //                                   .size = {
-        //                                       .minMax = {.min = textboxData.minDimensions.x * (maxLength + 2)},
+        //                                       .minMax = {.min = CHAR_W * (maxLength + 2)},
         //                                   },
         //                                   .type = CLAY__SIZING_TYPE_FIXED,
         //                               }};
-        Clay_Sizing dropdownSizing = {.width = CLAY_SIZING_FIXED(textboxData.minDimensions.x * (maxLength + 6))};
+        Clay_Sizing dropdownSizing = {.width = CLAY_SIZING_FIXED(CHAR_W * (maxLength + 6))};
 
         // CLAY({
         //     .layout = {.sizing = dropdownSizing},
@@ -1101,27 +1174,6 @@ void RenderScrollBar(ScrollID scrollId)
 
 void LayoutCreator_Initialize(Font defaultFont)
 {
-    textboxData.minDimensions = MeasureTextEx(defaultFont, "1", 16, 0);
-
-    defaultBoxPadding = (Clay_Padding){
-        textboxData.minDimensions.x,
-        textboxData.minDimensions.x,
-        textboxData.minDimensions.y / 4,
-        textboxData.minDimensions.y / 4,
-    };
-    buttonPadding = (Clay_Padding){
-        textboxData.minDimensions.x * 3,
-        textboxData.minDimensions.x * 3,
-        textboxData.minDimensions.y / 4,
-        textboxData.minDimensions.y / 4,
-    };
-    dropdownPadding = (Clay_Padding){
-        0,
-        0,
-        textboxData.minDimensions.y / 4,
-        textboxData.minDimensions.y / 4,
-    };
-
     for (size_t i = 0; i < TAB_ID_DUMMY_LAST; i++)
     {
         tabData.isDisabled[i] = true;
@@ -1231,26 +1283,15 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     .height = CLAY_SIZING_GROW(0),
                 },
                 .padding = CLAY_PADDING_ALL(16),
-                .childGap = textboxData.minDimensions.y,
+                .childGap = CHAR_H,
             },
             .backgroundColor = COLOR_BG_SECTION,
             .cornerRadius = CLAY_CORNER_RADIUS(16),
         })
         {
-            RenderDropdown(
-                CLAY_STRING("Test:"),
-                DROPDOWN_ID_TEST,
-                (DropdownOption[]){
-                    {"a", ""},
-                    {"ss", ""},
-                    {"ddd", ""},
-                    {"ffff", ""},
-                    DROPDOWN_OPTION_NULL,
-                });
-
             CLAY({
                 .layout = {
-                    .childGap = textboxData.minDimensions.x * 2,
+                    .childGap = CHAR_W * 2,
                     .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
             })
             {
@@ -1286,7 +1327,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     buttonPadding);
             }
 
-            CLAY({.layout = {.childGap = textboxData.minDimensions.x}})
+            CLAY({.layout = {.childGap = CHAR_W}})
             {
                 RenderDropdown(
                     CLAY_STRING("Output Type:"),
@@ -1379,7 +1420,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 CLAY({
                     .id = CLAY_ID("TabbedBoxContent"),
                     .layout = {
-                        // .layoutDirection = CLAY_TOP_TO_BOTTOM,
                         .sizing = {
                             .width = CLAY_SIZING_GROW(0),
                             .height = CLAY_SIZING_GROW(0),
@@ -1400,80 +1440,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     // },
                 })
                 {
-                    Clay_ElementDeclaration styleFilters = {
-                        .layout = {
-                            .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                            .sizing = {
-                                .width = CLAY_SIZING_GROW(0),
-                                // .height = CLAY_SIZING_GROW(0),
-                            },
-                            .childGap = textboxData.minDimensions.y,
-                        },
-                    };
-
-                    Clay_ElementDeclaration styleFilterGroup = {
-                        .layout = {
-                            .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                            .sizing = {
-                                .width = CLAY_SIZING_GROW(0, 250),
-                            },
-                            .childGap = 12,
-                        },
-                        .border = {
-                            .color = COLOR_GRAY,
-                            .width = (Clay_BorderWidth){0, 0, 0, 0, 1},
-                        },
-                    };
-
-                    Clay_ElementDeclaration styleFilterItemGroup = {
-                        .layout = {
-                            .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                            .sizing = {
-                                .width = CLAY_SIZING_GROW(0),
-                            },
-                            .childGap = textboxData.minDimensions.y / 2,
-                        },
-                    };
-
-                    // Clay_ElementDeclaration styleFilterRow = {
-                    //     .layout = {
-                    //         .sizing = {
-                    //             .width = CLAY_SIZING_GROW(0),
-                    //         },
-                    //         .childGap = textboxData.minDimensions.x,
-                    //     },
-                    // };
-
-                    Clay_ElementDeclaration styleFilterItem = {
-                        .layout = {
-                            .sizing = {
-                                .width = CLAY_SIZING_GROW(0),
-                            },
-                            .childGap = textboxData.minDimensions.x,
-                        },
-                    };
-
-                    Clay_ElementDeclaration styleFilterItemLabel = {
-                        .layout = {
-                            .sizing = {
-                                .width = CLAY_SIZING_GROW(0),
-                                .height = CLAY_SIZING_GROW(0),
-                            },
-                            .childAlignment = {
-                                .x = CLAY_ALIGN_X_RIGHT,
-                                .y = CLAY_ALIGN_X_CENTER,
-                            },
-                        },
-                    };
-
-                    Clay_ElementDeclaration styleFilterItemField = {
-                        .layout = {
-                            .sizing = {
-                                .width = CLAY_SIZING_GROW(0),
-                            },
-                        },
-                    };
-
                     switch (tabData.selectedTab)
                     {
                     case TAB_ID_DIMENSIONS:
@@ -1485,8 +1451,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
                                 CLAY(styleFilterItemGroup)
                                 {
-                                    // CLAY(styleFilterRow)
-                                    // {
                                     CLAY(styleFilterItem)
                                     {
                                         CLAY(styleFilterItemLabel)
@@ -1521,7 +1485,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                                 "in_h");
                                         }
                                     }
-                                    // }
                                 }
                             }
 
@@ -1531,8 +1494,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
                                 CLAY(styleFilterItemGroup)
                                 {
-                                    // CLAY(styleFilterRow)
-                                    // {
                                     CLAY(styleFilterItem)
                                     {
                                         CLAY(styleFilterItemLabel)
@@ -1567,10 +1528,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                                 "in_h");
                                         }
                                     }
-                                    // }
-
-                                    // CLAY(styleFilterRow)
-                                    // {
                                     CLAY(styleFilterItem)
                                     {
                                         CLAY(styleFilterItemLabel)
@@ -1605,7 +1562,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                                 "0");
                                         }
                                     }
-                                    // }
                                 }
                             }
                         }
@@ -1620,8 +1576,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
                                 CLAY(styleFilterItemGroup)
                                 {
-                                    // CLAY(styleFilterRow)
-                                    // {
                                     CLAY(styleFilterItem)
                                     {
                                         CLAY(styleFilterItemLabel)
@@ -1639,8 +1593,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                                 "30");
                                         }
                                     }
-                                    // CLAY(styleFilterItem) {}
-                                    // }
                                 }
                             }
 
@@ -1650,8 +1602,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
                                 CLAY(styleFilterItemGroup)
                                 {
-                                    // CLAY(styleFilterRow)
-                                    // {
                                     CLAY(styleFilterItem)
                                     {
                                         CLAY(styleFilterItemLabel)
@@ -1686,7 +1636,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                                 "");
                                         }
                                     }
-                                    // }
                                 }
                             }
 
@@ -1696,8 +1645,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
                                 CLAY(styleFilterItemGroup)
                                 {
-                                    // CLAY(styleFilterRow)
-                                    // {
                                     CLAY(styleFilterItem)
                                     {
                                         CLAY(styleFilterItemLabel)
@@ -1708,15 +1655,13 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                         {
                                             RenderTextbox(
                                                 CLAY_STRING(""),
-                                                TEXTBOX_ID_SPEED,
+                                                TEXTBOX_ID_SPEED_VIDEO,
                                                 (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
                                                 false,
                                                 4,
                                                 "1.0");
                                         }
                                     }
-                                    // CLAY(styleFilterItem) {}
-                                    // }
                                 }
                             }
                         }
@@ -1777,6 +1722,84 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                     }
                                 }
                             }
+
+                            CLAY(styleFilterGroup)
+                            {
+                                CLAY_TEXT(CLAY_STRING("Format"), TEXT_CONFIG_BOLD);
+
+                                CLAY(styleFilterItemGroup)
+                                {
+                                    CLAY(styleFilterItem)
+                                    {
+                                        CLAY(styleFilterItemLabel)
+                                        {
+                                            CLAY_TEXT(CLAY_STRING("channel layout:"), TEXT_CONFIG_BOLD);
+                                        }
+                                        CLAY(styleFilterItemField)
+                                        {
+                                            RenderDropdown(CLAY_STRING(""),
+                                                           DROPDOWN_ID_CHANNEL_LAYOUT,
+                                                           (DropdownOption[]){
+                                                               {"Stereo", "stereo"},
+                                                               {"Mono", "mono"},
+                                                               DROPDOWN_OPTION_NULL,
+                                                           });
+                                        }
+                                    }
+                                }
+                            }
+
+                            CLAY(styleFilterGroup)
+                            {
+                                CLAY_TEXT(CLAY_STRING("Playback Speed"), TEXT_CONFIG_BOLD);
+
+                                CLAY(styleFilterItemGroup)
+                                {
+                                    CLAY(styleFilterItem)
+                                    {
+                                        CLAY(styleFilterItemLabel)
+                                        {
+                                            CLAY_TEXT(CLAY_STRING("multiplier:"), TEXT_CONFIG_BOLD);
+                                        }
+                                        CLAY(styleFilterItemField)
+                                        {
+                                            RenderTextbox(
+                                                CLAY_STRING(""),
+                                                TEXTBOX_ID_SPEED_AUDIO,
+                                                (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
+                                                false,
+                                                4,
+                                                "1.0");
+                                        }
+                                    }
+                                }
+                            }
+
+                            CLAY(styleFilterGroup)
+                            {
+                                CLAY_TEXT(CLAY_STRING("Delay"), TEXT_CONFIG_BOLD);
+
+                                CLAY(styleFilterItemGroup)
+                                {
+                                    CLAY(styleFilterItem)
+                                    {
+                                        CLAY(styleFilterItemLabel)
+                                        {
+                                            CLAY_TEXT(CLAY_STRING("delay (ms):"), TEXT_CONFIG_BOLD);
+                                        }
+                                        CLAY(styleFilterItemField)
+                                        {
+                                            RenderTextbox(
+                                                CLAY_STRING(""),
+                                                TEXTBOX_ID_DELAY,
+                                                (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = 10000},
+                                                false,
+                                                5,
+                                                "0");
+                                        }
+                                    }
+                                }
+                            }
                         }
                         break;
 
@@ -1795,7 +1818,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
             CLAY({
                 .layout = {
-                    .childGap = textboxData.minDimensions.x * 2,
+                    .childGap = CHAR_W * 2,
                     .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
             })
             {
