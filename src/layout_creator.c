@@ -116,7 +116,7 @@ typedef enum
 typedef enum
 {
     SCROLL_ID_WINDOW,
-    // SCROLL_ID_TABBEDBOXCONTENT,
+    SCROLL_ID_TABBEDBOXCONTENT,
     SCROLL_ID_DUMMY_LAST,
 } ScrollID;
 
@@ -264,6 +264,8 @@ typedef struct
     char inputPath[TEXTBOX_BUFFER_SIZE];
     size_t streamCounts[STREAM_ID_DUMMY_LAST];
     cJSON *streams;
+    int width;
+    int height;
 } StreamData;
 
 TextboxData textboxData = {
@@ -339,9 +341,6 @@ Clay_Padding dropdownPadding = {
 Clay_ElementDeclaration styleFilters = {
     .layout = {
         .layoutDirection = CLAY_TOP_TO_BOTTOM,
-        .sizing = {
-            .width = CLAY_SIZING_GROW(0),
-        },
         .childGap = 20,
     },
 };
@@ -350,7 +349,7 @@ Clay_ElementDeclaration styleFilterGroup = {
     .layout = {
         .layoutDirection = CLAY_TOP_TO_BOTTOM,
         .sizing = {
-            .width = CLAY_SIZING_GROW(0, 250),
+            .width = CLAY_SIZING_FIXED(250),
         },
         .childGap = 12,
     },
@@ -375,7 +374,7 @@ Clay_ElementDeclaration styleFilterItem = {
         .sizing = {
             .width = CLAY_SIZING_GROW(0),
         },
-        .childGap = 8,
+        .childGap = CHAR_W,
     },
 };
 
@@ -550,7 +549,8 @@ void HandleLoadInputButtonInteraction(
         int ret = snprintf(
             buffer,
             sizeof(buffer),
-            "ffprobe -v error -show_streams -of json \"%s\"", getTextboxValue(TEXTBOX_ID_INPUT_PATH));
+            "ffprobe -v error -show_streams -of json \"%s\"",
+            getTextboxValue(TEXTBOX_ID_INPUT_PATH));
 
         if (ret < 0 || ret >= sizeof(buffer))
         {
@@ -630,31 +630,70 @@ void HandleLoadInputButtonInteraction(
 
             i++;
         }
-        LOG("v: %zu, a: %zu, s: %zu", streamData.streamCounts[STREAM_ID_VIDEO], streamData.streamCounts[STREAM_ID_AUDIO], streamData.streamCounts[STREAM_ID_SUBTITLES]);
+        // LOG("v: %zu, a: %zu, s: %zu", streamData.streamCounts[STREAM_ID_VIDEO], streamData.streamCounts[STREAM_ID_AUDIO], streamData.streamCounts[STREAM_ID_SUBTITLES]);
 
-        memcpy(&streamData.inputPath, getTextboxValue(TEXTBOX_ID_INPUT_PATH), TEXTBOX_BUFFER_SIZE);
+        memcpy(streamData.inputPath, getTextboxValue(TEXTBOX_ID_INPUT_PATH), TEXTBOX_BUFFER_SIZE);
 
         cJSON_Delete(json);
         pclose(fp);
 
         dropdownData.isInit[DROPDOWN_ID_OUTPUT_TYPE] = false;
-        LOG("%zu", tabData.selectedTab);
     }
 }
 
-void HandleConvertButtonInteraction(
+void HandleLoadPreviewButtonInteraction(
     Clay_ElementId elementId,
     Clay_PointerData pointerData,
     intptr_t userData)
 {
     if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
-        int result = convert();
+        char buffer[4096];
 
-        if (result)
+        int ret = snprintf(
+            buffer,
+            sizeof(buffer),
+            "ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 \"%s\"",
+            streamData.inputPath);
+
+        if (ret < 0 || ret >= sizeof(buffer))
         {
-            ERROR("Convert failed (%d)", result);
+            ERROR("Failed to write command into buffer.");
+            return;
         }
+
+        FILE *fp = popen(buffer, "r");
+        if (fp == NULL)
+        {
+            ERROR("Failed to execute command and establish pipe.");
+            return;
+        }
+
+        int width = 0;
+        int height = 0;
+        ret = fscanf(fp, "%d,%d", &width, &height);
+        if (ret != 2)
+        {
+            ERROR("Failed to read command output.");
+            return;
+        }
+        // LOG("%d,%d", width, height);
+        streamData.width = width;
+        streamData.height = height;
+
+        ret = snprintf(
+            buffer,
+            sizeof(buffer),
+            "ffmpeg -v error -i \"%s\" -vf \"scale=\"",
+            streamData.inputPath);
+
+        if (ret < 0 || ret >= sizeof(buffer))
+        {
+            ERROR("Failed to write command into buffer.");
+            return;
+        }
+
+        pclose(fp);
     }
 }
 
@@ -722,6 +761,22 @@ void HandleBrowseButtonInteraction(
     }
 }
 
+void HandleConvertButtonInteraction(
+    Clay_ElementId elementId,
+    Clay_PointerData pointerData,
+    intptr_t userData)
+{
+    if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
+    {
+        int result = convert();
+
+        if (result)
+        {
+            ERROR("Convert failed (%d)", result);
+        }
+    }
+}
+
 void HandleDropdownOptionInteraction(
     Clay_ElementId elementId,
     Clay_PointerData pointerData,
@@ -752,7 +807,7 @@ void HandleTabInteraction(
     }
 }
 
-void HandleThumbInteraction(
+void HandleThumbVerticalInteraction(
     Clay_ElementId elementId,
     Clay_PointerData pointerData,
     intptr_t userData)
@@ -765,9 +820,26 @@ void HandleThumbInteraction(
     }
     else if (pointerData.state == CLAY_POINTER_DATA_PRESSED)
     {
-
         Vector2 scrollDelta = GetMouseDelta();
         scrollData.data[index].scrollPosition->y -= scrollDelta.y * scrollData.data[index].contentDimensions.height / scrollData.data[index].scrollContainerDimensions.height;
+        scrollData.scrolling = index;
+    }
+    else if (pointerData.state == CLAY_POINTER_DATA_RELEASED)
+    {
+        scrollData.scrolling = -1;
+    }
+}
+
+void HandleThumbHorizontalInteraction(
+    Clay_ElementId elementId,
+    Clay_PointerData pointerData,
+    intptr_t userData)
+{
+    size_t index = (size_t)userData;
+    if (pointerData.state == CLAY_POINTER_DATA_PRESSED)
+    {
+        Vector2 scrollDelta = GetMouseDelta();
+        scrollData.data[index].scrollPosition->x -= scrollDelta.x * scrollData.data[index].contentDimensions.width / scrollData.data[index].scrollContainerDimensions.width;
         scrollData.scrolling = index;
     }
     else if (pointerData.state == CLAY_POINTER_DATA_RELEASED)
@@ -922,7 +994,6 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
                            Clay_PointerOver(CLAY_IDI("DropdownOptions", dropdownId));
 
     size_t maxLength = 0;
-    // size_t maxLength = strlen(options[dropdownData.selectedOptions[dropdownId]].label) + 2;
     size_t dropdownSize;
     for (dropdownSize = 0; options[dropdownSize].value != NULL; dropdownSize++)
     {
@@ -960,24 +1031,8 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
             buttonBorderWidth = (Clay_BorderWidth)CLAY_BORDER_OUTSIDE(1);
         }
 
-        // Clay_Sizing dropdownSizing = {.width = {
-        //                                   .size = {
-        //                                       .minMax = {.min = CHAR_W * (maxLength + 2)},
-        //                                   },
-        //                                   .type = CLAY__SIZING_TYPE_FIXED,
-        //                               }};
         Clay_Sizing dropdownSizing = {.width = CLAY_SIZING_FIXED(CHAR_W * (maxLength + 6))};
 
-        // CLAY({
-        //     .layout = {.sizing = dropdownSizing},
-        //     .backgroundColor = COLOR_BG_DROPDOWN,
-        //     .cornerRadius = buttonCornerRadius,
-        //     // .border = {
-        //     //     .color = COLOR_BORDER_DROPDOWN,
-        //     //     .width = buttonBorderWidth,
-        //     // },
-        // })
-        // {
         CLAY({
             .id = CLAY_IDI("DropdownButton", dropdownId),
             .layout = {
@@ -1115,59 +1170,120 @@ void RenderTab(Clay_String label, StreamID streamId)
     }
 }
 
-void RenderScrollBar(ScrollID scrollId)
+void RenderScrollBar(ScrollID scrollId, bool vertical, bool horizontal)
 {
-    CLAY({
-        .layout = {
-            .sizing = {
-                .width = 16,
-                .height = scrollData.data[scrollId].scrollContainerDimensions.height,
-            }},
-        .backgroundColor = COLOR_BG_SCROLLBAR,
-        .cornerRadius = CLAY_CORNER_RADIUS(8),
-        .floating = {
-            .attachPoints = {
-                .element = CLAY_ATTACH_POINT_RIGHT_TOP,
-                .parent = CLAY_ATTACH_POINT_RIGHT_TOP,
-            },
-            .attachTo = CLAY_ATTACH_TO_PARENT,
-        },
-    })
+    if (vertical)
     {
         CLAY({
             .layout = {
                 .sizing = {
                     .width = 16,
-                    .height = (scrollData.data[scrollId].scrollContainerDimensions.height / scrollData.data[scrollId].contentDimensions.height) * scrollData.data[scrollId].scrollContainerDimensions.height,
-                },
-            },
-            .backgroundColor = scrollData.scrolling == scrollId || Clay_Hovered() ? COLOR_BG_THUMB_HOVERED : COLOR_BG_THUMB,
+                    .height = scrollData.data[scrollId].scrollContainerDimensions.height,
+                }},
+            .backgroundColor = COLOR_BG_SCROLLBAR,
             .cornerRadius = CLAY_CORNER_RADIUS(8),
             .floating = {
-                .offset = (Clay_Vector2){0, -scrollData.data[scrollId].scrollPosition->y * scrollData.data[scrollId].scrollContainerDimensions.height / scrollData.data[scrollId].contentDimensions.height},
+                .attachPoints = {
+                    .element = CLAY_ATTACH_POINT_RIGHT_TOP,
+                    .parent = CLAY_ATTACH_POINT_RIGHT_TOP,
+                },
                 .attachTo = CLAY_ATTACH_TO_PARENT,
             },
         })
         {
-            Clay_OnHover(HandleThumbInteraction, scrollId);
-        }
-
-        if (scrollData.scrolling == scrollId)
-        {
+            float ratio = scrollData.data[scrollId].scrollContainerDimensions.height / scrollData.data[scrollId].contentDimensions.height;
             CLAY({
                 .layout = {
                     .sizing = {
-                        .width = CLAY_SIZING_GROW(0),
-                        .height = CLAY_SIZING_GROW(0),
+                        .width = 16,
+                        .height = (ratio)*scrollData.data[scrollId].scrollContainerDimensions.height,
                     },
                 },
-                // .backgroundColor = (Clay_Color){255, 255, 255, 30},
+                .backgroundColor = scrollData.scrolling == scrollId || Clay_Hovered() ? COLOR_BG_THUMB_HOVERED : COLOR_BG_THUMB,
+                .cornerRadius = CLAY_CORNER_RADIUS(8),
                 .floating = {
-                    .attachTo = CLAY_ATTACH_TO_ROOT,
+                    .offset = (Clay_Vector2){0, -scrollData.data[scrollId].scrollPosition->y * ratio},
+                    .attachTo = CLAY_ATTACH_TO_PARENT,
                 },
             })
             {
-                Clay_OnHover(HandleThumbInteraction, scrollId);
+                Clay_OnHover(HandleThumbVerticalInteraction, scrollId);
+            }
+
+            if (scrollData.scrolling == scrollId)
+            {
+                CLAY({
+                    .layout = {
+                        .sizing = {
+                            .width = CLAY_SIZING_GROW(0),
+                            .height = CLAY_SIZING_GROW(0),
+                        },
+                    },
+                    .floating = {
+                        .attachTo = CLAY_ATTACH_TO_ROOT,
+                    },
+                })
+                {
+                    Clay_OnHover(HandleThumbVerticalInteraction, scrollId);
+                }
+            }
+        }
+    }
+
+    if (horizontal)
+    {
+        CLAY({
+            .layout = {
+                .sizing = {
+                    .width = scrollData.data[scrollId].scrollContainerDimensions.width,
+                    .height = 16,
+                }},
+            .backgroundColor = COLOR_BG_SCROLLBAR,
+            .cornerRadius = CLAY_CORNER_RADIUS(8),
+            .floating = {
+                .attachPoints = {
+                    .element = CLAY_ATTACH_POINT_RIGHT_BOTTOM,
+                    .parent = CLAY_ATTACH_POINT_RIGHT_BOTTOM,
+                },
+                .attachTo = CLAY_ATTACH_TO_PARENT,
+            },
+        })
+        {
+            float ratio = scrollData.data[scrollId].scrollContainerDimensions.width / scrollData.data[scrollId].contentDimensions.width;
+            CLAY({
+                .layout = {
+                    .sizing = {
+                        .width = ratio * scrollData.data[scrollId].scrollContainerDimensions.width,
+                        .height = 16,
+                    },
+                },
+                .backgroundColor = scrollData.scrolling == scrollId || Clay_Hovered() ? COLOR_BG_THUMB_HOVERED : COLOR_BG_THUMB,
+                .cornerRadius = CLAY_CORNER_RADIUS(8),
+                .floating = {
+                    .offset = (Clay_Vector2){-scrollData.data[scrollId].scrollPosition->x * ratio, 0},
+                    .attachTo = CLAY_ATTACH_TO_PARENT,
+                },
+            })
+            {
+                Clay_OnHover(HandleThumbHorizontalInteraction, scrollId);
+            }
+
+            if (scrollData.scrolling == scrollId)
+            {
+                CLAY({
+                    .layout = {
+                        .sizing = {
+                            .width = CLAY_SIZING_GROW(0),
+                            .height = CLAY_SIZING_GROW(0),
+                        },
+                    },
+                    .floating = {
+                        .attachTo = CLAY_ATTACH_TO_ROOT,
+                    },
+                })
+                {
+                    Clay_OnHover(HandleThumbHorizontalInteraction, scrollId);
+                }
             }
         }
     }
@@ -1231,9 +1347,10 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
     textboxData.focusData.focusRegistered = false;
 
     scrollData.data[SCROLL_ID_WINDOW] = Clay_GetScrollContainerData(CLAY_ID("WindowContainer"));
-    // scrollData.data[SCROLL_ID_TABBEDBOXCONTENT] = Clay_GetScrollContainerData(CLAY_ID("TabbedBoxContent"));
-    bool scrollingWindow = scrollData.data[SCROLL_ID_WINDOW].found && scrollData.data[SCROLL_ID_WINDOW].scrollContainerDimensions.height != scrollData.data[SCROLL_ID_WINDOW].contentDimensions.height;
-    // bool scrollingTabbedBoxContent = scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].found && scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].scrollContainerDimensions.height != scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].contentDimensions.height;
+    scrollData.data[SCROLL_ID_TABBEDBOXCONTENT] = Clay_GetScrollContainerData(CLAY_ID("TabbedBoxContent"));
+    bool scrollingWindow = scrollData.data[SCROLL_ID_WINDOW].found && scrollData.data[SCROLL_ID_WINDOW].scrollContainerDimensions.height < scrollData.data[SCROLL_ID_WINDOW].contentDimensions.height;
+    bool scrollingTabbedBoxContent = scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].found && scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].scrollContainerDimensions.width < scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].contentDimensions.width;
+    // LOG("scrollContainerDimensions.width = %g, contentDimensions.width = %g", scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].scrollContainerDimensions.width, scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].contentDimensions.width);
 
     CLAY({
         .id = CLAY_ID("WindowContainer"),
@@ -1253,7 +1370,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
     {
         if (scrollingWindow)
         {
-            RenderScrollBar(SCROLL_ID_WINDOW);
+            RenderScrollBar(SCROLL_ID_WINDOW, true, false);
         }
 
         if (scrollData.scrolling == SCROLL_ID_DUMMY_LAST)
@@ -1425,8 +1542,8 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                             .width = CLAY_SIZING_GROW(0),
                             .height = CLAY_SIZING_GROW(0),
                         },
-                        .padding = CLAY_PADDING_ALL(16),
-                        .childGap = 16,
+                        .padding = scrollingTabbedBoxContent ? (Clay_Padding){16, 16, 16, 32} : CLAY_PADDING_ALL(16),
+                        .childGap = 32,
                     },
                     .backgroundColor = COLOR_BG_TAB_SELECTED,
                     .cornerRadius = (Clay_CornerRadius){0, 0, 16, 16},
@@ -1434,13 +1551,17 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                         .color = COLOR_BORDER_TAB,
                         .width = (Clay_BorderWidth){1, 1, 0, 1, 0},
                     },
-                    // .clip = {
-                    //     .vertical = true,
-                    //     .horizontal = true,
-                    //     .childOffset = Clay_GetScrollOffset(),
-                    // },
+                    .clip = {
+                        .horizontal = true,
+                        .childOffset = Clay_GetScrollOffset(),
+                    },
                 })
                 {
+                    if (scrollingTabbedBoxContent)
+                    {
+                        RenderScrollBar(SCROLL_ID_TABBEDBOXCONTENT, false, true);
+                    }
+
                     switch (tabData.selectedTab)
                     {
                     case TAB_ID_DIMENSIONS:
@@ -1564,6 +1685,34 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                                         }
                                     }
                                 }
+                            }
+                        }
+
+                        CLAY({
+                            .layout = {
+                                .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                                .childGap = CHAR_H,
+                            },
+                        })
+                        {
+                            RenderButton(
+                                CLAY_STRING("Load Preview"),
+                                BUTTON_ID_LOAD_PREVIEW,
+                                false,
+                                HandleLoadPreviewButtonInteraction,
+                                0,
+                                buttonPadding);
+
+                            CLAY({
+                                .layout = {
+                                    .sizing = {
+                                        .width = CLAY_SIZING_FIXED(256),
+                                        .height = CLAY_SIZING_FIXED(256),
+                                    },
+                                },
+                                .backgroundColor = COLOR_GRAY,
+                            })
+                            {
                             }
                         }
                         break;
@@ -1892,11 +2041,11 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         scrollData.scrolling = SCROLL_ID_DUMMY_LAST;
         scrollData.middleClickPosition = GetMousePosition();
     }
-    if (IsMouseButtonDown(MOUSE_BUTTON_MIDDLE))
+    else if (IsMouseButtonDown(MOUSE_BUTTON_MIDDLE))
     {
-        HandleThumbInteraction(CLAY_ID(""), (Clay_PointerData){0}, SCROLL_ID_DUMMY_LAST);
+        HandleThumbVerticalInteraction(CLAY_ID(""), (Clay_PointerData){0}, SCROLL_ID_DUMMY_LAST);
     }
-    else if (IsMouseButtonUp)
+    else if (IsMouseButtonUp(MOUSE_BUTTON_MIDDLE))
     {
         scrollData.scrolling = -1;
     }
