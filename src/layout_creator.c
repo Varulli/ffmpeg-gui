@@ -22,25 +22,25 @@
 #define CHAR_H 16
 
 #define TEXT_CONFIG_DEFAULT CLAY_TEXT_CONFIG({ \
-    .fontId = FONT_ID_BODY_16,                 \
-    .fontSize = 16,                            \
+    .fontId = FONT_ID_BODY,                    \
+    .fontSize = fontData.fontSize,             \
     .textColor = COLOR_WHITE,                  \
 })
 #define TEXT_CONFIG_FAINT CLAY_TEXT_CONFIG({ \
-    .fontId = FONT_ID_BODY_16,               \
-    .fontSize = 16,                          \
+    .fontId = FONT_ID_BODY,                  \
+    .fontSize = fontData.fontSize,           \
     .textColor = COLOR_LIGHTGRAY,            \
 })
 #define TEXT_CONFIG_BOLD CLAY_TEXT_CONFIG({ \
-    .fontId = FONT_ID_BOLD_16,              \
-    .fontSize = 16,                         \
+    .fontId = FONT_ID_BOLD,                 \
+    .fontSize = fontData.fontSize,          \
     .textColor = COLOR_WHITE,               \
 })
-// #define TEXT_CONFIG_SYMBOL CLAY_TEXT_CONFIG({ \
-//     .fontId = FONT_ID_SYMBOL_16,              \
-//     .fontSize = 16,                           \
-//     .textColor = COLOR_WHITE,                 \
-// })
+#define TEXT_CONFIG_SYMBOL CLAY_TEXT_CONFIG({ \
+    .fontId = FONT_ID_SYMBOL,                 \
+    .fontSize = fontData.fontSize,            \
+    .textColor = COLOR_WHITE,                 \
+})
 
 #define DROPDOWN_OPTION_NULL {"", NULL}
 #define DROPDOWN_OPTION_UNSELECTED {"---", ""}
@@ -56,9 +56,9 @@
 
 typedef enum
 {
-    FONT_ID_BODY_16,
-    FONT_ID_BOLD_16,
-    FONT_ID_SYMBOL_16,
+    FONT_ID_BODY,
+    FONT_ID_BOLD,
+    FONT_ID_SYMBOL,
     FONT_ID_DUMMY_LAST
 } FontID;
 
@@ -201,6 +201,13 @@ const Clay_Color COLOR_LIGHTGRAY = {200, 200, 200, 255};
 
 typedef struct
 {
+    size_t fontSize;
+    size_t fontSizeMin;
+    size_t fontSizeMax;
+} FontData;
+
+typedef struct
+{
     bool focusRegistered;
     int focusIndex;
     double focusStartTime;
@@ -279,6 +286,12 @@ typedef struct
     int width;
     int height;
 } StreamData;
+
+FontData fontData = {
+    .fontSize = 16,
+    .fontSizeMin = 8,
+    .fontSizeMax = 32,
+};
 
 TextboxData textboxData = {
     .hoveredTextbox = -1,
@@ -361,7 +374,7 @@ Clay_ElementDeclaration styleFilterGroup = {
     .layout = {
         .layoutDirection = CLAY_TOP_TO_BOTTOM,
         .sizing = {
-            .width = CLAY_SIZING_FIXED(250),
+            .width = CLAY_SIZING_FIXED(300),
         },
         .childGap = 12,
     },
@@ -370,7 +383,7 @@ Clay_ElementDeclaration styleFilterGroup = {
         .width = (Clay_BorderWidth){0, 0, 0, 0, 1},
     },
 };
-
+// TODO: Refactor styles to change based on font size; add font size adjustment
 Clay_ElementDeclaration styleFilterItemGroup = {
     .layout = {
         .layoutDirection = CLAY_TOP_TO_BOTTOM,
@@ -1158,7 +1171,7 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
     bool dropdownHovered = Clay_PointerOver(CLAY_IDI("DropdownButton", dropdownId)) ||
                            Clay_PointerOver(CLAY_IDI("DropdownOptions", dropdownId));
 
-    size_t maxLength = 0;
+    size_t maxLength = strlen(options[dropdownData.selectedOptions[dropdownId]].label) + 3;
     size_t dropdownSize;
     for (dropdownSize = 0; options[dropdownSize].value != NULL; dropdownSize++)
     {
@@ -1220,7 +1233,13 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
                 .length = length,
                 .chars = chars,
             };
-            CLAY_TEXT(str, TEXT_CONFIG_DEFAULT);
+            CLAY({.layout = {.childGap = CHAR_W * 2}})
+            {
+                CLAY_TEXT(str, TEXT_CONFIG_DEFAULT);
+                CLAY_TEXT(expandDropdown ? CLAY_STRING("▲") : dropdownSize > 1 ? CLAY_STRING("▼")
+                                                                               : CLAY_STRING("▽"),
+                          TEXT_CONFIG_SYMBOL);
+            }
 
             if (expandDropdown)
             {
