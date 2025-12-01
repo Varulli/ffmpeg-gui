@@ -5,8 +5,12 @@
 #include <stdio.h>
 
 #ifdef _WIN32
+// #include <windows.h>
+#include <windef.h>
+#include <winbase.h>
 #include <processthreadsapi.h>
 #include <errhandlingapi.h>
+#include <namedpipeapi.h>
 #else
 #include <unistd.h>
 #endif
@@ -116,9 +120,16 @@ typedef enum
 typedef enum
 {
     SCROLL_ID_WINDOW,
-    SCROLL_ID_TABBEDBOXCONTENT,
+    // SCROLL_ID_TABBEDBOXCONTENT,
     SCROLL_ID_DUMMY_LAST,
 } ScrollID;
+
+typedef enum
+{
+    DIRECTION_ID_NONE,
+    DIRECTION_ID_VERTICAL,
+    DIRECTION_ID_HORIZONTAL,
+} DirectionID;
 
 typedef enum
 {
@@ -251,6 +262,7 @@ typedef struct
 {
     Clay_ScrollContainerData data[SCROLL_ID_DUMMY_LAST];
     int scrolling;
+    DirectionID directionLock;
     Vector2 middleClickPosition;
 } ScrollData;
 typedef struct
@@ -263,7 +275,7 @@ typedef struct
 {
     char inputPath[TEXTBOX_BUFFER_SIZE];
     size_t streamCounts[STREAM_ID_DUMMY_LAST];
-    cJSON *streams;
+    Texture2D imagePreviewTexture;
     int width;
     int height;
 } StreamData;
@@ -566,6 +578,7 @@ void HandleLoadInputButtonInteraction(
         }
 
         ret = fread(buffer, 1, sizeof(buffer), fp);
+        pclose(fp);
         if (ret < sizeof(buffer) && ferror(fp))
         {
             ERROR("Failed to read command output.");
@@ -581,7 +594,6 @@ void HandleLoadInputButtonInteraction(
             {
                 ERROR("Error before: %s", errorPtr);
             }
-            pclose(fp);
             return;
         }
 
@@ -593,7 +605,6 @@ void HandleLoadInputButtonInteraction(
         {
             ERROR("Failed to get streams object from JSON.");
             cJSON_Delete(json);
-            pclose(fp);
             return;
         }
 
@@ -633,10 +644,7 @@ void HandleLoadInputButtonInteraction(
         // LOG("v: %zu, a: %zu, s: %zu", streamData.streamCounts[STREAM_ID_VIDEO], streamData.streamCounts[STREAM_ID_AUDIO], streamData.streamCounts[STREAM_ID_SUBTITLES]);
 
         memcpy(streamData.inputPath, getTextboxValue(TEXTBOX_ID_INPUT_PATH), TEXTBOX_BUFFER_SIZE);
-
         cJSON_Delete(json);
-        pclose(fp);
-
         dropdownData.isInit[DROPDOWN_ID_OUTPUT_TYPE] = false;
     }
 }
@@ -669,23 +677,53 @@ void HandleLoadPreviewButtonInteraction(
             return;
         }
 
-        int width = 0;
-        int height = 0;
+        int width;
+        int height;
         ret = fscanf(fp, "%d,%d", &width, &height);
+        pclose(fp);
         if (ret != 2)
         {
             ERROR("Failed to read command output.");
             return;
         }
-        // LOG("%d,%d", width, height);
+        LOG("%d,%d", width, height);
         streamData.width = width;
         streamData.height = height;
 
+        LOG("%s,%s", getTextboxValue(TEXTBOX_ID_SCALE_W), getTextboxValue(TEXTBOX_ID_SCALE_H));
+        int scaledWidth = atoi(getTextboxValue(TEXTBOX_ID_SCALE_W));
+        int scaledHeight = atoi(getTextboxValue(TEXTBOX_ID_SCALE_H));
+        if (scaledWidth == -1 && scaledHeight == -1)
+        {
+            ERROR("Both scaled dimensions are -1.");
+            return;
+        }
+        if (scaledWidth == -1)
+        {
+            scaledWidth = width * scaledHeight / height;
+        }
+        else if (scaledWidth == 0)
+        {
+            scaledWidth = width;
+        }
+        if (scaledHeight == -1)
+        {
+            scaledHeight = height * scaledWidth / width;
+        }
+        else if (scaledHeight == 0)
+        {
+            scaledHeight = height;
+        }
+
+        LOG("scaledWidth = %d, scaledHeight = %d", scaledWidth, scaledHeight);
         ret = snprintf(
             buffer,
             sizeof(buffer),
-            "ffmpeg -v error -i \"%s\" -vf \"scale=\"",
-            streamData.inputPath);
+            "ffmpeg -v error -i \"%s\" -vf \"scale=%d:%d\" -vframes 1 -f rawvideo -pix_fmt rgba -",
+            streamData.inputPath,
+            scaledWidth,
+            scaledHeight);
+        // LOG("Command: %s", buffer);
 
         if (ret < 0 || ret >= sizeof(buffer))
         {
@@ -693,7 +731,125 @@ void HandleLoadPreviewButtonInteraction(
             return;
         }
 
-        pclose(fp);
+        // fp = popen(buffer, "r");
+        // if (fp == NULL)
+        // {
+        //     ERROR("Failed to execute command and establish pipe.");
+        //     return;
+        // }
+
+        HANDLE hStdOutRead, hStdOutWrite;
+        HANDLE hStdErrRead, hStdErrWrite;
+
+        SECURITY_ATTRIBUTES sa;
+        sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+        sa.bInheritHandle = TRUE; // Make handles inheritable
+        sa.lpSecurityDescriptor = NULL;
+
+        CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 0);
+        CreatePipe(&hStdErrRead, &hStdErrWrite, &sa, 0);
+
+        // Prepare STARTUPINFO
+        STARTUPINFO si;
+        ZeroMemory(&si, sizeof(si));
+        si.cb = sizeof(si);
+        si.dwFlags |= STARTF_USESTDHANDLES;
+        si.hStdOutput = hStdOutWrite;
+        si.hStdError = hStdErrWrite;
+        // si.hStdInput = ... (if redirecting input)
+
+        // Launch child process
+        PROCESS_INFORMATION pi = {0};
+        CreateProcess(
+            NULL,   // lpApplicationName
+            buffer, // lpCommandLine
+            NULL,   // lpProcessAttributes
+            NULL,   // lpThreadAttributes
+            TRUE,   // bInheritHandles - IMPORTANT!
+            0,      // dwCreationFlags
+            NULL,   // lpEnvironment
+            NULL,   // lpCurrentDirectory
+            &si,    // lpStartupInfo
+            &pi     // lpProcessInformation
+        );
+
+        // Close write handles in parent (child now owns them)
+        CloseHandle(hStdOutWrite);
+        CloseHandle(hStdErrWrite);
+
+        size_t imageBufferSize = scaledWidth * scaledHeight * 4;
+        LOG("imageBufferSize = %zu", imageBufferSize);
+        unsigned char *imageBuffer = calloc(imageBufferSize, sizeof(unsigned char));
+
+        // Read from hStdOutRead and hStdErrRead to get child's output
+        // ...
+        DWORD nBytesRead;
+        size_t total = 0;
+        do
+        {
+            ReadFile(hStdOutRead, imageBuffer + total, imageBufferSize - total, &nBytesRead, NULL);
+            total += nBytesRead;
+            // LOG("nBytesRead = %zu, total = %zu", nBytesRead, total);
+        } while (nBytesRead > 0);
+
+        size_t errBufferSize = 20000;
+        unsigned char *errBuffer = calloc(errBufferSize, sizeof(unsigned char));
+        DWORD nErrBytesRead;
+        ReadFile(hStdErrRead, errBuffer, errBufferSize, &nErrBytesRead, NULL);
+        if (nErrBytesRead > 0)
+        {
+            ERROR("%s", errBuffer);
+        }
+
+        size_t errTotal = 0;
+        do
+        {
+            ReadFile(hStdOutRead, errBuffer + errTotal, errBufferSize - errTotal, &nErrBytesRead, NULL);
+        } while (nErrBytesRead > 0);
+        if (errTotal > 0)
+        {
+            ERROR("Received more bytes than expected (>=%zu).", errTotal);
+            free(imageBuffer);
+            free(errBuffer);
+            return;
+        }
+        free(errBuffer);
+
+        // Wait for child process to exit and close handles
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        CloseHandle(hStdOutRead);
+        CloseHandle(hStdErrRead);
+
+        if (total != imageBufferSize)
+        {
+            ERROR("Total bytes read (%zu) less than image buffer size (%zu)", total, imageBufferSize);
+            return;
+        }
+
+        // ret = 0
+        // ret = fread(imageBuffer + ret, 1, imageBufferSize - ret, fp);
+        // pclose(fp);
+        // if (ret < imageBufferSize && ferror(fp))
+        // {
+        //     ERROR("Failed to read command output.");
+        //     return;
+        // }
+
+        Image image = {
+            .data = imageBuffer,
+            .width = scaledWidth,
+            .height = scaledHeight,
+            .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+            .mipmaps = 1,
+        };
+        streamData.imagePreviewTexture = LoadTextureFromImage(image);
+        if (streamData.imagePreviewTexture.id == 0)
+        {
+            ERROR("Failed to load texture from image.");
+        }
+        UnloadImage(image);
     }
 }
 
@@ -823,10 +979,12 @@ void HandleThumbVerticalInteraction(
         Vector2 scrollDelta = GetMouseDelta();
         scrollData.data[index].scrollPosition->y -= scrollDelta.y * scrollData.data[index].contentDimensions.height / scrollData.data[index].scrollContainerDimensions.height;
         scrollData.scrolling = index;
+        scrollData.directionLock = DIRECTION_ID_VERTICAL;
     }
     else if (pointerData.state == CLAY_POINTER_DATA_RELEASED)
     {
         scrollData.scrolling = -1;
+        scrollData.directionLock = DIRECTION_ID_NONE;
     }
 }
 
@@ -836,15 +994,21 @@ void HandleThumbHorizontalInteraction(
     intptr_t userData)
 {
     size_t index = (size_t)userData;
-    if (pointerData.state == CLAY_POINTER_DATA_PRESSED)
+    if (index == SCROLL_ID_DUMMY_LAST)
+    {
+        scrollData.data[SCROLL_ID_WINDOW].scrollPosition->x -= (GetMouseX() - scrollData.middleClickPosition.x) * 0.5;
+    }
+    else if (pointerData.state == CLAY_POINTER_DATA_PRESSED)
     {
         Vector2 scrollDelta = GetMouseDelta();
         scrollData.data[index].scrollPosition->x -= scrollDelta.x * scrollData.data[index].contentDimensions.width / scrollData.data[index].scrollContainerDimensions.width;
         scrollData.scrolling = index;
+        scrollData.directionLock = DIRECTION_ID_HORIZONTAL;
     }
     else if (pointerData.state == CLAY_POINTER_DATA_RELEASED)
     {
         scrollData.scrolling = -1;
+        scrollData.directionLock = DIRECTION_ID_NONE;
     }
 }
 
@@ -858,11 +1022,12 @@ void RenderTextbox(
 {
     if (!textboxData.isInit[textboxId])
     {
-        textboxData.textboxBuffers[textboxId].charsDefault = charsDefault;
         textboxData.textboxBuffers[textboxId].numberboxConfig = numberboxConfig;
         // textboxData.isDisabled[textboxId] = isDisabled;
         textboxData.isInit[textboxId] = true;
     }
+
+    textboxData.textboxBuffers[textboxId].charsDefault = charsDefault;
 
     bool focused = (textboxData.focusData.focusIndex == textboxId);
 
@@ -1199,7 +1364,7 @@ void RenderScrollBar(ScrollID scrollId, bool vertical, bool horizontal)
                         .height = (ratio)*scrollData.data[scrollId].scrollContainerDimensions.height,
                     },
                 },
-                .backgroundColor = scrollData.scrolling == scrollId || Clay_Hovered() ? COLOR_BG_THUMB_HOVERED : COLOR_BG_THUMB,
+                .backgroundColor = (scrollData.scrolling == scrollId && scrollData.directionLock == DIRECTION_ID_VERTICAL) || Clay_Hovered() ? COLOR_BG_THUMB_HOVERED : COLOR_BG_THUMB,
                 .cornerRadius = CLAY_CORNER_RADIUS(8),
                 .floating = {
                     .offset = (Clay_Vector2){0, -scrollData.data[scrollId].scrollPosition->y * ratio},
@@ -1210,9 +1375,10 @@ void RenderScrollBar(ScrollID scrollId, bool vertical, bool horizontal)
                 Clay_OnHover(HandleThumbVerticalInteraction, scrollId);
             }
 
-            if (scrollData.scrolling == scrollId)
+            if (scrollData.scrolling == scrollId && scrollData.directionLock != DIRECTION_ID_HORIZONTAL)
             {
                 CLAY({
+                    .id = CLAY_IDI("VerticalScrollBox", scrollId),
                     .layout = {
                         .sizing = {
                             .width = CLAY_SIZING_GROW(0),
@@ -1235,21 +1401,21 @@ void RenderScrollBar(ScrollID scrollId, bool vertical, bool horizontal)
         CLAY({
             .layout = {
                 .sizing = {
-                    .width = scrollData.data[scrollId].scrollContainerDimensions.width,
+                    .width = scrollData.data[scrollId].scrollContainerDimensions.width - 16,
                     .height = 16,
                 }},
             .backgroundColor = COLOR_BG_SCROLLBAR,
             .cornerRadius = CLAY_CORNER_RADIUS(8),
             .floating = {
                 .attachPoints = {
-                    .element = CLAY_ATTACH_POINT_RIGHT_BOTTOM,
-                    .parent = CLAY_ATTACH_POINT_RIGHT_BOTTOM,
+                    .element = CLAY_ATTACH_POINT_LEFT_BOTTOM,
+                    .parent = CLAY_ATTACH_POINT_LEFT_BOTTOM,
                 },
                 .attachTo = CLAY_ATTACH_TO_PARENT,
             },
         })
         {
-            float ratio = scrollData.data[scrollId].scrollContainerDimensions.width / scrollData.data[scrollId].contentDimensions.width;
+            float ratio = (scrollData.data[scrollId].scrollContainerDimensions.width - 16) / scrollData.data[scrollId].contentDimensions.width;
             CLAY({
                 .layout = {
                     .sizing = {
@@ -1257,7 +1423,7 @@ void RenderScrollBar(ScrollID scrollId, bool vertical, bool horizontal)
                         .height = 16,
                     },
                 },
-                .backgroundColor = scrollData.scrolling == scrollId || Clay_Hovered() ? COLOR_BG_THUMB_HOVERED : COLOR_BG_THUMB,
+                .backgroundColor = (scrollData.scrolling == scrollId && scrollData.directionLock == DIRECTION_ID_HORIZONTAL) || Clay_Hovered() ? COLOR_BG_THUMB_HOVERED : COLOR_BG_THUMB,
                 .cornerRadius = CLAY_CORNER_RADIUS(8),
                 .floating = {
                     .offset = (Clay_Vector2){-scrollData.data[scrollId].scrollPosition->x * ratio, 0},
@@ -1268,9 +1434,10 @@ void RenderScrollBar(ScrollID scrollId, bool vertical, bool horizontal)
                 Clay_OnHover(HandleThumbHorizontalInteraction, scrollId);
             }
 
-            if (scrollData.scrolling == scrollId)
+            if (scrollData.scrolling == scrollId && scrollData.directionLock != DIRECTION_ID_VERTICAL)
             {
                 CLAY({
+                    .id = CLAY_IDI("HorizontalScrollBox", scrollId),
                     .layout = {
                         .sizing = {
                             .width = CLAY_SIZING_GROW(0),
@@ -1347,9 +1514,15 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
     textboxData.focusData.focusRegistered = false;
 
     scrollData.data[SCROLL_ID_WINDOW] = Clay_GetScrollContainerData(CLAY_ID("WindowContainer"));
-    scrollData.data[SCROLL_ID_TABBEDBOXCONTENT] = Clay_GetScrollContainerData(CLAY_ID("TabbedBoxContent"));
-    bool scrollingWindow = scrollData.data[SCROLL_ID_WINDOW].found && scrollData.data[SCROLL_ID_WINDOW].scrollContainerDimensions.height < scrollData.data[SCROLL_ID_WINDOW].contentDimensions.height;
-    bool scrollingTabbedBoxContent = scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].found && scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].scrollContainerDimensions.width < scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].contentDimensions.width;
+    // scrollData.data[SCROLL_ID_TABBEDBOXCONTENT] = Clay_GetScrollContainerData(CLAY_ID("TabbedBoxContent"));
+    bool scrollingWindowVertical = false;
+    bool scrollingWindowHorizontal = false;
+    if (scrollData.data[SCROLL_ID_WINDOW].found)
+    {
+        scrollingWindowVertical = scrollData.data[SCROLL_ID_WINDOW].scrollContainerDimensions.height < scrollData.data[SCROLL_ID_WINDOW].contentDimensions.height;
+        scrollingWindowHorizontal = scrollData.data[SCROLL_ID_WINDOW].scrollContainerDimensions.width < scrollData.data[SCROLL_ID_WINDOW].contentDimensions.width;
+    }
+    // bool scrollingTabbedBoxContent = scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].found && scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].scrollContainerDimensions.width < scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].contentDimensions.width;
     // LOG("scrollContainerDimensions.width = %g, contentDimensions.width = %g", scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].scrollContainerDimensions.width, scrollData.data[SCROLL_ID_TABBEDBOXCONTENT].contentDimensions.width);
 
     CLAY({
@@ -1359,19 +1532,17 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 .width = CLAY_SIZING_GROW(0),
                 .height = CLAY_SIZING_GROW(0),
             },
-            .padding = scrollingWindow ? (Clay_Padding){16, 32, 16, 16} : CLAY_PADDING_ALL(16),
+            .padding = (Clay_Padding){16, scrollingWindowVertical ? 32 : 16, 16, scrollingWindowHorizontal ? 32 : 16},
         },
         .backgroundColor = COLOR_BG_MAIN,
         .clip = {
             .vertical = true,
+            .horizontal = true,
             .childOffset = Clay_GetScrollOffset(),
         },
     })
     {
-        if (scrollingWindow)
-        {
-            RenderScrollBar(SCROLL_ID_WINDOW, true, false);
-        }
+        RenderScrollBar(SCROLL_ID_WINDOW, scrollingWindowVertical, scrollingWindowHorizontal);
 
         if (scrollData.scrolling == SCROLL_ID_DUMMY_LAST)
         {
@@ -1542,7 +1713,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                             .width = CLAY_SIZING_GROW(0),
                             .height = CLAY_SIZING_GROW(0),
                         },
-                        .padding = scrollingTabbedBoxContent ? (Clay_Padding){16, 16, 16, 32} : CLAY_PADDING_ALL(16),
+                        .padding = /*scrollingTabbedBoxContent ? (Clay_Padding){16, 16, 16, 32} :*/ CLAY_PADDING_ALL(16),
                         .childGap = 32,
                     },
                     .backgroundColor = COLOR_BG_TAB_SELECTED,
@@ -1551,16 +1722,16 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                         .color = COLOR_BORDER_TAB,
                         .width = (Clay_BorderWidth){1, 1, 0, 1, 0},
                     },
-                    .clip = {
-                        .horizontal = true,
-                        .childOffset = Clay_GetScrollOffset(),
-                    },
+                    // .clip = {
+                    //     .horizontal = true,
+                    //     .childOffset = Clay_GetScrollOffset(),
+                    // },
                 })
                 {
-                    if (scrollingTabbedBoxContent)
-                    {
-                        RenderScrollBar(SCROLL_ID_TABBEDBOXCONTENT, false, true);
-                    }
+                    // if (scrollingTabbedBoxContent)
+                    // {
+                    //     RenderScrollBar(SCROLL_ID_TABBEDBOXCONTENT, false, true);
+                    // }
 
                     switch (tabData.selectedTab)
                     {
@@ -1706,11 +1877,14 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                             CLAY({
                                 .layout = {
                                     .sizing = {
-                                        .width = CLAY_SIZING_FIXED(256),
-                                        .height = CLAY_SIZING_FIXED(256),
+                                        .width = CLAY_SIZING_FIXED(512),
+                                        .height = CLAY_SIZING_FIXED(512),
                                     },
                                 },
-                                .backgroundColor = COLOR_GRAY,
+                                // .backgroundColor = COLOR_GRAY,
+                                .image = {
+                                    .imageData = &streamData.imagePreviewTexture,
+                                },
                             })
                             {
                             }
@@ -2044,8 +2218,9 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
     else if (IsMouseButtonDown(MOUSE_BUTTON_MIDDLE))
     {
         HandleThumbVerticalInteraction(CLAY_ID(""), (Clay_PointerData){0}, SCROLL_ID_DUMMY_LAST);
+        HandleThumbHorizontalInteraction(CLAY_ID(""), (Clay_PointerData){0}, SCROLL_ID_DUMMY_LAST);
     }
-    else if (IsMouseButtonUp(MOUSE_BUTTON_MIDDLE))
+    else if (scrollData.scrolling == SCROLL_ID_DUMMY_LAST && IsMouseButtonUp(MOUSE_BUTTON_MIDDLE))
     {
         scrollData.scrolling = -1;
     }
