@@ -62,10 +62,12 @@ int main(void)
 {
     Clay_Raylib_Initialize(1000, 600, "ffmpeg GUI", FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT); // Extra parameters to this function are new since the video was published
 
+    LayoutCreator_Initialize();
+
     Font fonts[FONT_ID_DUMMY_LAST];
     fonts[FONT_ID_BODY] = LoadFontEx("resources/fonts/consolas.ttf", fontData.fontSizeMax, NULL, 0);
     fonts[FONT_ID_BOLD] = LoadFontEx("resources/fonts/consolas-bold.ttf", fontData.fontSizeMax, NULL, 0);
-    int codepoints[] = {0x25B2, 0x25B3, 0x25BC, 0x25BD, 'A', 'B', 'C', 'D', 'E', 'F'};
+    int codepoints[] = {0x25B2, 0x25B3, 0x25BC, 0x25BD};
     fonts[FONT_ID_SYMBOL] = LoadFontEx("resources/fonts/NotoSansJP-Regular.ttf", fontData.fontSizeMax, codepoints, sizeof(codepoints) / sizeof(codepoints[0]));
     for (size_t i = 0; i < FONT_ID_DUMMY_LAST; i++)
     {
@@ -77,8 +79,6 @@ int main(void)
     Clay_Arena clayMemory = Clay_CreateArenaWithCapacityAndMemory(clayRequiredMemory, malloc(clayRequiredMemory));
     Clay_Context *clayContext = Clay_Initialize(clayMemory, (Clay_Dimensions){.width = GetScreenWidth(), .height = GetScreenHeight()}, (Clay_ErrorHandler){HandleClayErrors}); // This final argument is new since the video was published
     Clay_SetMeasureTextFunction(Raylib_MeasureText, fonts);
-
-    LayoutCreator_Initialize(fonts[FONT_ID_BODY]);
 
     Clay_SetDebugModeEnabled(true);
 

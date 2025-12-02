@@ -18,9 +18,6 @@
 #define TEXTBOX_BUFFER_SIZE 256
 #define FLOAT_MAX 1e5f
 
-#define CHAR_W 8
-#define CHAR_H 16
-
 #define TEXT_CONFIG_DEFAULT CLAY_TEXT_CONFIG({ \
     .fontId = FONT_ID_BODY,                    \
     .fontSize = fontData.fontSize,             \
@@ -204,6 +201,8 @@ typedef struct
     size_t fontSize;
     size_t fontSizeMin;
     size_t fontSizeMax;
+    size_t charWidth;
+    size_t charHeight;
 } FontData;
 
 typedef struct
@@ -283,146 +282,50 @@ typedef struct
     char inputPath[TEXTBOX_BUFFER_SIZE];
     size_t streamCounts[STREAM_ID_DUMMY_LAST];
     Texture2D imagePreviewTexture;
-    int width;
-    int height;
 } StreamData;
 
-FontData fontData = {
-    .fontSize = 16,
-    .fontSizeMin = 8,
-    .fontSizeMax = 32,
-};
-
-TextboxData textboxData = {
-    .hoveredTextbox = -1,
-    .focusData = {
-        .focusRegistered = false,
-        .focusIndex = -1,
-    },
-};
-
-DropdownData dropdownData = {
-    .hoveredOption = 0,
-    .hoveredValue = NULL,
-};
-
+FontData fontData;
+TextboxData textboxData;
+DropdownData dropdownData;
 // ButtonData buttonData = {0};
+TabData tabData;
+ScrollData scrollData;
+StreamData streamData;
 
-TabData tabData = {
-    .selectedTab = TAB_ID_DIMENSIONS,
-};
+// FormatData formatVideoData[FORMAT_VIDEO_ID_DUMMY_LAST] = {
+//     {.name = "GIF", .extensions = "gif"},
+//     {.name = "MKV", .extensions = "mkv"},
+//     {.name = "MOV", .extensions = "mov"},
+//     {.name = "MP4", .extensions = "mp4"},
+//     {.name = "WEBM", .extensions = "webm"},
+// };
 
-ScrollData scrollData = {
-    .scrolling = -1,
-};
+// FormatData formatAudioData[FORMAT_AUDIO_ID_DUMMY_LAST] = {
+//     {.name = "FLAC", .extensions = "flac"},
+//     {.name = "M4A", .extensions = "m4a"},
+//     {.name = "MP3", .extensions = "mp3"},
+//     {.name = "OGG", .extensions = "ogg,oga"},
+//     {.name = "OPUS", .extensions = "opus"},
+//     {.name = "WAV", .extensions = "wav,wave"},
+// };
 
-FormatData formatVideoData[FORMAT_VIDEO_ID_DUMMY_LAST] = {
-    {.name = "GIF", .extensions = "gif"},
-    {.name = "MKV", .extensions = "mkv"},
-    {.name = "MOV", .extensions = "mov"},
-    {.name = "MP4", .extensions = "mp4"},
-    {.name = "WEBM", .extensions = "webm"},
-};
+// FormatData formatImageData[FORMAT_IMAGE_ID_DUMMY_LAST] = {
+//     {.name = "JPEG", .extensions = "jpg,jpeg,jpe,jfif"},
+//     {.name = "PNG", .extensions = "png"},
+//     {.name = "TIFF", .extensions = "tiff,tif"},
+//     {.name = "WEBP", .extensions = "webp"},
+// };
 
-FormatData formatAudioData[FORMAT_AUDIO_ID_DUMMY_LAST] = {
-    {.name = "FLAC", .extensions = "flac"},
-    {.name = "M4A", .extensions = "m4a"},
-    {.name = "MP3", .extensions = "mp3"},
-    {.name = "OGG", .extensions = "ogg,oga"},
-    {.name = "OPUS", .extensions = "opus"},
-    {.name = "WAV", .extensions = "wav,wave"},
-};
+Clay_Padding defaultBoxPadding;
+Clay_Padding buttonPadding;
+Clay_Padding dropdownPadding;
 
-FormatData formatImageData[FORMAT_IMAGE_ID_DUMMY_LAST] = {
-    {.name = "JPEG", .extensions = "jpg,jpeg,jpe,jfif"},
-    {.name = "PNG", .extensions = "png"},
-    {.name = "TIFF", .extensions = "tiff,tif"},
-    {.name = "WEBP", .extensions = "webp"},
-};
-
-StreamData streamData = {0};
-
-Clay_Padding defaultBoxPadding = {
-    CHAR_W,
-    CHAR_W,
-    CHAR_H / 4,
-    CHAR_H / 4,
-};
-
-Clay_Padding buttonPadding = {
-    CHAR_W * 3,
-    CHAR_W * 3,
-    CHAR_H / 4,
-    CHAR_H / 4,
-};
-
-Clay_Padding dropdownPadding = {
-    0,
-    0,
-    CHAR_H / 4,
-    CHAR_H / 4,
-};
-
-Clay_ElementDeclaration styleFilters = {
-    .layout = {
-        .layoutDirection = CLAY_TOP_TO_BOTTOM,
-        .childGap = 20,
-    },
-};
-
-Clay_ElementDeclaration styleFilterGroup = {
-    .layout = {
-        .layoutDirection = CLAY_TOP_TO_BOTTOM,
-        .sizing = {
-            .width = CLAY_SIZING_FIXED(300),
-        },
-        .childGap = 12,
-    },
-    .border = {
-        .color = COLOR_GRAY,
-        .width = (Clay_BorderWidth){0, 0, 0, 0, 1},
-    },
-};
-// TODO: Refactor styles to change based on font size; add font size adjustment
-Clay_ElementDeclaration styleFilterItemGroup = {
-    .layout = {
-        .layoutDirection = CLAY_TOP_TO_BOTTOM,
-        .sizing = {
-            .width = CLAY_SIZING_GROW(0),
-        },
-        .childGap = 8,
-    },
-};
-
-Clay_ElementDeclaration styleFilterItem = {
-    .layout = {
-        .sizing = {
-            .width = CLAY_SIZING_GROW(0),
-        },
-        .childGap = CHAR_W,
-    },
-};
-
-Clay_ElementDeclaration styleFilterItemLabel = {
-    .layout = {
-        .sizing = {
-            .width = CLAY_SIZING_GROW(0),
-            .height = CLAY_SIZING_GROW(0),
-        },
-        .childAlignment = {
-            .x = CLAY_ALIGN_X_RIGHT,
-            .y = CLAY_ALIGN_X_CENTER,
-        },
-    },
-};
-
-Clay_ElementDeclaration styleFilterItemField = {
-    .layout = {
-        .sizing = {
-            .width = CLAY_SIZING_GROW(0),
-        },
-    },
-};
+Clay_ElementDeclaration styleFilters;
+Clay_ElementDeclaration styleFilterGroup;
+Clay_ElementDeclaration styleFilterItemGroup;
+Clay_ElementDeclaration styleFilterItem;
+Clay_ElementDeclaration styleFilterItemLabel;
+Clay_ElementDeclaration styleFilterItemField;
 
 const char *getTextboxValue(TextboxID textboxId)
 {
@@ -699,11 +602,9 @@ void HandleLoadPreviewButtonInteraction(
             ERROR("Failed to read command output.");
             return;
         }
-        LOG("%d,%d", width, height);
-        streamData.width = width;
-        streamData.height = height;
+        // LOG("%d,%d", width, height);
 
-        LOG("%s,%s", getTextboxValue(TEXTBOX_ID_SCALE_W), getTextboxValue(TEXTBOX_ID_SCALE_H));
+        // LOG("%s,%s", getTextboxValue(TEXTBOX_ID_SCALE_W), getTextboxValue(TEXTBOX_ID_SCALE_H));
         int scaledWidth = atoi(getTextboxValue(TEXTBOX_ID_SCALE_W));
         int scaledHeight = atoi(getTextboxValue(TEXTBOX_ID_SCALE_H));
         if (scaledWidth == -1 && scaledHeight == -1)
@@ -728,7 +629,7 @@ void HandleLoadPreviewButtonInteraction(
             scaledHeight = height;
         }
 
-        LOG("scaledWidth = %d, scaledHeight = %d", scaledWidth, scaledHeight);
+        // LOG("scaledWidth = %d, scaledHeight = %d", scaledWidth, scaledHeight);
         ret = snprintf(
             buffer,
             sizeof(buffer),
@@ -744,102 +645,84 @@ void HandleLoadPreviewButtonInteraction(
             return;
         }
 
-        // fp = popen(buffer, "r");
-        // if (fp == NULL)
-        // {
-        //     ERROR("Failed to execute command and establish pipe.");
-        //     return;
-        // }
+        size_t imageBufferSize = scaledWidth * scaledHeight * 4;
+        // LOG("imageBufferSize = %zu", imageBufferSize);
+        unsigned char *imageBuffer = calloc(imageBufferSize, sizeof(unsigned char));
+        size_t totalBytesRead = 0;
 
+#ifdef _WIN32
+        // Create read/write pipes
         HANDLE hStdOutRead, hStdOutWrite;
-        HANDLE hStdErrRead, hStdErrWrite;
+        // HANDLE hStdErrRead, hStdErrWrite;
 
         SECURITY_ATTRIBUTES sa;
         sa.nLength = sizeof(SECURITY_ATTRIBUTES);
-        sa.bInheritHandle = TRUE; // Make handles inheritable
+        sa.bInheritHandle = TRUE;
         sa.lpSecurityDescriptor = NULL;
 
         CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 0);
-        CreatePipe(&hStdErrRead, &hStdErrWrite, &sa, 0);
+        // CreatePipe(&hStdErrRead, &hStdErrWrite, &sa, 0);
 
-        // Prepare STARTUPINFO
+        // Create child process
         STARTUPINFO si;
         ZeroMemory(&si, sizeof(si));
         si.cb = sizeof(si);
         si.dwFlags |= STARTF_USESTDHANDLES;
         si.hStdOutput = hStdOutWrite;
-        si.hStdError = hStdErrWrite;
-        // si.hStdInput = ... (if redirecting input)
+        // si.hStdError = hStdErrWrite;
 
-        // Launch child process
         PROCESS_INFORMATION pi = {0};
-        CreateProcess(
-            NULL,   // lpApplicationName
-            buffer, // lpCommandLine
-            NULL,   // lpProcessAttributes
-            NULL,   // lpThreadAttributes
-            TRUE,   // bInheritHandles - IMPORTANT!
-            0,      // dwCreationFlags
-            NULL,   // lpEnvironment
-            NULL,   // lpCurrentDirectory
-            &si,    // lpStartupInfo
-            &pi     // lpProcessInformation
-        );
+        CreateProcess(NULL, buffer, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
 
-        // Close write handles in parent (child now owns them)
+        // Close write handles in parent
         CloseHandle(hStdOutWrite);
-        CloseHandle(hStdErrWrite);
+        // CloseHandle(hStdErrWrite);
 
-        size_t imageBufferSize = scaledWidth * scaledHeight * 4;
-        LOG("imageBufferSize = %zu", imageBufferSize);
-        unsigned char *imageBuffer = calloc(imageBufferSize, sizeof(unsigned char));
-
-        // Read from hStdOutRead and hStdErrRead to get child's output
-        // ...
+        // Read from stdout
         DWORD nBytesRead;
-        size_t total = 0;
         do
         {
-            ReadFile(hStdOutRead, imageBuffer + total, imageBufferSize - total, &nBytesRead, NULL);
-            total += nBytesRead;
+            ReadFile(hStdOutRead, imageBuffer + totalBytesRead, imageBufferSize - totalBytesRead, &nBytesRead, NULL);
+            totalBytesRead += nBytesRead;
             // LOG("nBytesRead = %zu, total = %zu", nBytesRead, total);
         } while (nBytesRead > 0);
 
-        size_t errBufferSize = 20000;
-        unsigned char *errBuffer = calloc(errBufferSize, sizeof(unsigned char));
-        DWORD nErrBytesRead;
-        ReadFile(hStdErrRead, errBuffer, errBufferSize, &nErrBytesRead, NULL);
-        if (nErrBytesRead > 0)
-        {
-            ERROR("%s", errBuffer);
-        }
+        // size_t errBufferSize = 20000;
+        // unsigned char *errBuffer = calloc(errBufferSize, sizeof(unsigned char));
+        // DWORD nErrBytesRead;
+        // ReadFile(hStdErrRead, errBuffer, errBufferSize, &nErrBytesRead, NULL);
+        // if (nErrBytesRead > 0)
+        // {
+        //     ERROR("%s", errBuffer);
+        // }
 
-        size_t errTotal = 0;
-        do
-        {
-            ReadFile(hStdOutRead, errBuffer + errTotal, errBufferSize - errTotal, &nErrBytesRead, NULL);
-        } while (nErrBytesRead > 0);
-        if (errTotal > 0)
-        {
-            ERROR("Received more bytes than expected (>=%zu).", errTotal);
-            free(imageBuffer);
-            free(errBuffer);
-            return;
-        }
-        free(errBuffer);
+        // size_t errTotal = 0;
+        // do
+        // {
+        //     ReadFile(hStdOutRead, errBuffer + errTotal, errBufferSize - errTotal, &nErrBytesRead, NULL);
+        // } while (nErrBytesRead > 0);
+        // if (errTotal > 0)
+        // {
+        //     ERROR("Received more bytes than expected (>=%zu).", errTotal);
+        //     free(imageBuffer);
+        //     free(errBuffer);
+        //     return;
+        // }
+        // free(errBuffer);
 
         // Wait for child process to exit and close handles
         WaitForSingleObject(pi.hProcess, INFINITE);
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         CloseHandle(hStdOutRead);
-        CloseHandle(hStdErrRead);
-
-        if (total != imageBufferSize)
-        {
-            ERROR("Total bytes read (%zu) less than image buffer size (%zu)", total, imageBufferSize);
-            return;
-        }
+        // CloseHandle(hStdErrRead);
+#else
+        // fp = popen(buffer, "r");
+        // if (fp == NULL)
+        // {
+        //     ERROR("Failed to execute command and establish pipe.");
+        //     return;
+        // }
 
         // ret = 0
         // ret = fread(imageBuffer + ret, 1, imageBufferSize - ret, fp);
@@ -849,6 +732,13 @@ void HandleLoadPreviewButtonInteraction(
         //     ERROR("Failed to read command output.");
         //     return;
         // }
+#endif
+
+        if (totalBytesRead != imageBufferSize)
+        {
+            ERROR("Total bytes read (%zu) less than image buffer size (%zu)", totalBytesRead, imageBufferSize);
+            return;
+        }
 
         Image image = {
             .data = imageBuffer,
@@ -1047,7 +937,7 @@ void RenderTextbox(
     CLAY({
         .id = CLAY_IDI("Textbox", textboxId),
         .layout = {
-            .childGap = CHAR_W,
+            .childGap = fontData.charWidth,
             .childAlignment = {.y = CLAY_ALIGN_Y_CENTER},
         },
     })
@@ -1064,7 +954,7 @@ void RenderTextbox(
                     .width = {
                         .size = {
                             .minMax = {
-                                .min = CHAR_W * (maxCharsDisplayed + 2),
+                                .min = fontData.charWidth * (maxCharsDisplayed + 2),
                             },
                         },
                     },
@@ -1185,7 +1075,7 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
     CLAY({
         .id = CLAY_IDI("Dropdown", dropdownId),
         .layout = {
-            .childGap = CHAR_W,
+            .childGap = fontData.charWidth,
             .childAlignment = {.y = CLAY_ALIGN_Y_CENTER},
         },
     })
@@ -1209,7 +1099,7 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
             buttonBorderWidth = (Clay_BorderWidth)CLAY_BORDER_OUTSIDE(1);
         }
 
-        Clay_Sizing dropdownSizing = {.width = CLAY_SIZING_FIXED(CHAR_W * (maxLength + 6))};
+        Clay_Sizing dropdownSizing = {.width = CLAY_SIZING_FIXED(fontData.charWidth * (maxLength + 6))};
 
         CLAY({
             .id = CLAY_IDI("DropdownButton", dropdownId),
@@ -1233,7 +1123,7 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
                 .length = length,
                 .chars = chars,
             };
-            CLAY({.layout = {.childGap = CHAR_W * 2}})
+            CLAY({.layout = {.childGap = fontData.charWidth * 2}})
             {
                 CLAY_TEXT(str, TEXT_CONFIG_DEFAULT);
                 CLAY_TEXT(expandDropdown ? CLAY_STRING("▲") : dropdownSize > 1 ? CLAY_STRING("▼")
@@ -1475,12 +1365,147 @@ void RenderScrollBar(ScrollID scrollId, bool vertical, bool horizontal)
     }
 }
 
-void LayoutCreator_Initialize(Font defaultFont)
+void setStyles()
+{
+    size_t charHeightOverFour = fontData.charHeight / 4;
+
+    defaultBoxPadding = (Clay_Padding){
+        fontData.charWidth,
+        fontData.charWidth,
+        charHeightOverFour,
+        charHeightOverFour,
+    };
+
+    buttonPadding = (Clay_Padding){
+        fontData.charWidth * 3,
+        fontData.charWidth * 3,
+        charHeightOverFour,
+        charHeightOverFour,
+    };
+
+    dropdownPadding = (Clay_Padding){
+        0,
+        0,
+        charHeightOverFour,
+        charHeightOverFour,
+    };
+
+    styleFilters = (Clay_ElementDeclaration){
+        .layout = {
+            .layoutDirection = CLAY_TOP_TO_BOTTOM,
+            .childGap = charHeightOverFour * 6,
+        },
+    };
+
+    styleFilterGroup = (Clay_ElementDeclaration){
+        .layout = {
+            .layoutDirection = CLAY_TOP_TO_BOTTOM,
+            .sizing = {
+                .width = CLAY_SIZING_FIXED(300),
+            },
+            .childGap = charHeightOverFour * 3,
+        },
+        .border = {
+            .color = COLOR_GRAY,
+            .width = (Clay_BorderWidth){0, 0, 0, 0, 1},
+        },
+    };
+
+    styleFilterItemGroup = (Clay_ElementDeclaration){
+        .layout = {
+            .layoutDirection = CLAY_TOP_TO_BOTTOM,
+            .sizing = {
+                .width = CLAY_SIZING_GROW(0),
+            },
+            .childGap = fontData.charWidth,
+        },
+    };
+
+    styleFilterItem = (Clay_ElementDeclaration){
+        .layout = {
+            .sizing = {
+                .width = CLAY_SIZING_GROW(0),
+            },
+            .childGap = fontData.charWidth,
+        },
+    };
+
+    styleFilterItemLabel = (Clay_ElementDeclaration){
+        .layout = {
+            .sizing = {
+                .width = CLAY_SIZING_GROW(0),
+                .height = CLAY_SIZING_GROW(0),
+            },
+            .childAlignment = {
+                .x = CLAY_ALIGN_X_RIGHT,
+                .y = CLAY_ALIGN_X_CENTER,
+            },
+        },
+    };
+
+    styleFilterItemField = (Clay_ElementDeclaration){
+        .layout = {
+            .sizing = {
+                .width = CLAY_SIZING_GROW(0),
+            },
+        },
+    };
+}
+
+void LayoutCreator_Initialize()
 {
     for (size_t i = 0; i < TAB_ID_DUMMY_LAST; i++)
     {
         tabData.isDisabled[i] = true;
     }
+
+    fontData = (FontData){
+        .fontSize = 16,
+        .fontSizeMin = 8,
+        .fontSizeMax = 32,
+        .charWidth = 8,
+        .charHeight = 16,
+    };
+
+    textboxData = (TextboxData){
+        .textboxBuffers = {0},
+        .isInit = {0},
+        .hoveredTextbox = -1,
+        .focusData = {
+            .focusRegistered = false,
+            .focusIndex = -1,
+        },
+    };
+
+    dropdownData = (DropdownData){
+        .selectedOptions = {0},
+        .selectedValues = {0},
+        .isInit = {0},
+        .hoveredOption = 0,
+        .hoveredValue = NULL,
+    };
+
+    // ButtonData buttonData = {0};
+
+    tabData = (TabData){
+        .selectedTab = TAB_ID_DIMENSIONS,
+        .isDisabled = {0},
+    };
+
+    scrollData = (ScrollData){
+        .data = {0},
+        .scrolling = -1,
+        .directionLock = DIRECTION_ID_NONE,
+        .middleClickPosition = {0},
+    };
+
+    streamData = (StreamData){
+        .inputPath = {0},
+        .streamCounts = {0},
+        .imagePreviewTexture = {0},
+    };
+
+    setStyles();
 
     NFD_Init();
 }
@@ -1591,7 +1616,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     .height = CLAY_SIZING_GROW(0),
                 },
                 .padding = CLAY_PADDING_ALL(16),
-                .childGap = CHAR_H,
+                .childGap = fontData.charHeight,
             },
             .backgroundColor = COLOR_BG_SECTION,
             .cornerRadius = CLAY_CORNER_RADIUS(16),
@@ -1599,7 +1624,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         {
             CLAY({
                 .layout = {
-                    .childGap = CHAR_W * 2,
+                    .childGap = fontData.charWidth * 2,
                     .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
             })
             {
@@ -1635,7 +1660,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     buttonPadding);
             }
 
-            CLAY({.layout = {.childGap = CHAR_W}})
+            CLAY({.layout = {.childGap = fontData.charWidth}})
             {
                 RenderDropdown(
                     CLAY_STRING("Output Type:"),
@@ -1881,7 +1906,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                         CLAY({
                             .layout = {
                                 .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                                .childGap = CHAR_H,
+                                .childGap = fontData.charHeight,
                             },
                         })
                         {
@@ -2163,7 +2188,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
             CLAY({
                 .layout = {
-                    .childGap = CHAR_W * 2,
+                    .childGap = fontData.charWidth * 2,
                     .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
             })
             {
