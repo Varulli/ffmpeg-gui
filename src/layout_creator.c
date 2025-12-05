@@ -54,7 +54,7 @@ typedef enum
 {
     FONT_ID_BODY,
     FONT_ID_BOLD,
-    FONT_ID_SYMBOL,
+    // FONT_ID_SYMBOL,
     FONT_ID_DUMMY_LAST
 } FontID;
 
@@ -414,6 +414,7 @@ const char *GetFilePathWithoutExt(const char *filePath)
 int convert()
 {
     char buffer[4096];
+    int ret;
 
     // Validate input path
     if (!FileExists(streamData.inputPath))
@@ -476,19 +477,43 @@ int convert()
     }
 
     char slash = '/';
-
-    bool outputVideo = outputType == 'v';
-    bool outputAudio = outputType == 'a' || (outputVideo && strcmp(outputExt, ".gif"));
-    bool outputImage = outputType == 'i';
-
 #ifdef _WIN32
     const char *slashPtr = strchr(outputDir, '\\');
     if (slashPtr != NULL)
     {
         slash = '\\';
     }
+#endif
 
-    int ret = snprintf(
+    size_t fullOutputPathSize = strlen(outputDir) + strlen(outputName) + strlen(outputExt) + 2;
+    char *fullOutputPath = malloc(fullOutputPathSize);
+    if (fullOutputPath == NULL)
+    {
+        ERROR("Failed to allocate memory.");
+        return 6;
+    }
+    ret = snprintf(fullOutputPath, fullOutputPathSize, "%s%c%s%s", outputDir, slash, outputName, outputExt);
+    if (ret < 0 || ret >= fullOutputPathSize)
+    {
+        ERROR("Failed to write output into buffer.");
+        free(fullOutputPath);
+        return 7;
+    }
+    if (strcmp(streamData.inputPath, fullOutputPath) == 0)
+    {
+        ERROR("Input and output are the same.");
+        free(fullOutputPath);
+        return 8;
+    }
+    free(fullOutputPath);
+
+    bool outputVideo = outputType == 'v';
+    bool gifInput = strcmp(GetFileExtension(streamData.inputPath), ".gif") == 0;
+    bool outputAudio = (outputType == 'a' || (outputVideo && strcmp(outputExt, ".gif"))) && streamData.streamCounts[STREAM_ID_AUDIO] > 0;
+    bool outputImage = outputType == 'i';
+
+#ifdef _WIN32
+    ret = snprintf(
         buffer,
         sizeof(buffer),
         "ffmpeg -v error -progress pipe:1 -y -i \"%s\" -filter_complex \"",
@@ -499,7 +524,7 @@ int convert()
         ret += snprintf(
             buffer + ret,
             sizeof(buffer) - ret,
-            "[0:v]fps=%s,trim=%s:%s,setpts=(PTS-STARTPTS)/%s,crop=%s:%s:%s:%s,scale=%s:%s%s%s%s[out_v];",
+            "[0:v]fps=%s,trim=%s:%s,setpts=(PTS-STARTPTS)/%s,crop=%s:%s:%s:%s,scale=%s:%s%s%s%s%s[out_v];",
             getTextboxValue(TEXTBOX_ID_FPS),
             getTextboxValue(TEXTBOX_ID_DURATION_START_VIDEO),
             getTextboxValue(TEXTBOX_ID_DURATION_END_VIDEO)[0] == 'e' ? "" : getTextboxValue(TEXTBOX_ID_DURATION_END_VIDEO),
@@ -512,7 +537,8 @@ int convert()
             getTextboxValue(TEXTBOX_ID_SCALE_H),
             !burnSubtitles ? "" : ",subtitles='",
             !burnSubtitles ? "" : trim(getTextboxValue(TEXTBOX_ID_SUBTITLES_SOURCE)),
-            !burnSubtitles ? "" : "'");
+            !burnSubtitles ? "" : "'",
+            !gifInput ? "" : ",format=yuv420p");
     }
     if (outputAudio)
     {
@@ -557,8 +583,9 @@ int convert()
     ret += snprintf(
         buffer + ret,
         sizeof(buffer) - ret,
-        "\" %s %s %s \"%s%c%s%s\"",
+        "\" %s %s %s %s \"%s%c%s%s\"",
         outputVideo || outputImage ? "-map \"[out_v]\"" : "",
+        outputVideo && gifInput ? "-c:v libx264 -movflags +faststart" : "",
         outputAudio ? "-map \"[out_a]\"" : "",
         outputImage ? "-vframes 1" : "",
         outputDir, slash, outputName, outputExt);
@@ -566,7 +593,7 @@ int convert()
     if (ret < 0 || ret >= sizeof(buffer))
     {
         ERROR("Failed to write command into buffer.");
-        return 6;
+        return 9;
     }
 
     LOG("cmd = \"%s\"", buffer);
@@ -764,7 +791,7 @@ void HandleLoadPreviewButtonInteraction(
         }
         if (scaleWidth == -1)
         {
-            scaleWidth = width * scaleHeight / height;
+            scaleWidth = cropWidth * scaleHeight / cropHeight;
         }
         else if (scaleWidth == 0)
         {
@@ -772,7 +799,7 @@ void HandleLoadPreviewButtonInteraction(
         }
         if (scaleHeight == -1)
         {
-            scaleHeight = height * scaleWidth / width;
+            scaleHeight = cropHeight * scaleWidth / cropWidth;
         }
         else if (scaleHeight == 0)
         {
@@ -1339,13 +1366,13 @@ void RenderDropdown(Clay_String label, DropdownID dropdownId, DropdownOption *op
                 .length = length,
                 .chars = chars,
             };
-            CLAY({.layout = {.childGap = fontData.charWidth * 2}})
-            {
-                CLAY_TEXT(str, TEXT_CONFIG_DEFAULT);
-                CLAY_TEXT(expandDropdown ? CLAY_STRING("▲") : dropdownSize > 1 ? CLAY_STRING("▼")
-                                                                               : CLAY_STRING("▽"),
-                          TEXT_CONFIG_SYMBOL);
-            }
+            // CLAY({.layout = {.childGap = fontData.charWidth * 2}})
+            // {
+            CLAY_TEXT(str, TEXT_CONFIG_DEFAULT);
+            // CLAY_TEXT(expandDropdown ? CLAY_STRING("▲") : dropdownSize > 1 ? CLAY_STRING("▼")
+            //                                                                : CLAY_STRING("▽"),
+            //           TEXT_CONFIG_SYMBOL);
+            // }
 
             if (expandDropdown)
             {

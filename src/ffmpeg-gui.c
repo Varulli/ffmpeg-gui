@@ -67,8 +67,8 @@ int main(void)
     Font fonts[FONT_ID_DUMMY_LAST];
     fonts[FONT_ID_BODY] = LoadFontEx("resources/fonts/consolas.ttf", fontData.fontSizeMax, NULL, 0);
     fonts[FONT_ID_BOLD] = LoadFontEx("resources/fonts/consolas-bold.ttf", fontData.fontSizeMax, NULL, 0);
-    int codepoints[] = {0x25B2, 0x25B3, 0x25BC, 0x25BD};
-    fonts[FONT_ID_SYMBOL] = LoadFontEx("resources/fonts/NotoSansJP-Regular.ttf", fontData.fontSizeMax, codepoints, sizeof(codepoints) / sizeof(codepoints[0]));
+    // int codepoints[] = {0x25B2, 0x25B3, 0x25BC, 0x25BD};
+    // fonts[FONT_ID_SYMBOL] = LoadFontEx("resources/fonts/NotoSansJP-Regular.ttf", fontData.fontSizeMax, codepoints, sizeof(codepoints) / sizeof(codepoints[0]));
     for (size_t i = 0; i < FONT_ID_DUMMY_LAST; i++)
     {
         SetTextureFilter(fonts[i].texture, TEXTURE_FILTER_BILINEAR);
