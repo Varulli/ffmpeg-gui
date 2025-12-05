@@ -65,12 +65,12 @@ typedef enum
     TEXTBOX_ID_DURATION_START_VIDEO,
     TEXTBOX_ID_DURATION_END_VIDEO,
     TEXTBOX_ID_SPEED_VIDEO,
-    TEXTBOX_ID_SCALE_W,
-    TEXTBOX_ID_SCALE_H,
     TEXTBOX_ID_CROP_W,
     TEXTBOX_ID_CROP_H,
     TEXTBOX_ID_CROP_X,
     TEXTBOX_ID_CROP_Y,
+    TEXTBOX_ID_SCALE_W,
+    TEXTBOX_ID_SCALE_H,
     TEXTBOX_ID_VOLUME,
     TEXTBOX_ID_DURATION_START_AUDIO,
     TEXTBOX_ID_DURATION_END_AUDIO,
@@ -332,6 +332,10 @@ static const nfdu8filteritem_t imageFilters[] = {
     {"WEBP", "webp"},
 };
 
+static const char *defaultExtVideo = ".gif";
+static const char *defaultExtAudio = ".wav";
+static const char *defaultExtImage = ".jpg";
+
 Clay_RenderCommandArray LayoutCreator_CreateLayout();
 
 bool charMatchesAny(char c, const char *matchString)
@@ -412,66 +416,157 @@ int convert()
     char buffer[4096];
 
     // Validate input path
-    const char *inputPath = getTextboxValue(TEXTBOX_ID_INPUT_PATH);
-    if (!FileExists(inputPath))
+    if (!FileExists(streamData.inputPath))
     {
-        ERROR("Input file does not exist (\"%s\").", inputPath);
+        ERROR("Input file does not exist (\"%s\").", streamData.inputPath);
         return 1;
     }
-    // if (!IsFileExtension(inputPath, getDropdownValue(DROPDOWN_ID_STREAM_TYPE)))
-    // {
-    //     ERROR("Incorrect input file format (%s).", GetFileExtension(inputPath));
-    //     return 2;
-    // }
 
     // Validate output path
-    const char *outputPath = getTextboxValue(TEXTBOX_ID_OUTPUT_PATH);
+    const char *outputPath = trim(getTextboxValue(TEXTBOX_ID_OUTPUT_PATH));
     if (outputPath[0] == '\0')
     {
         ERROR("Output file is missing.");
-        return 3;
+        return 2;
     }
     const char *outputDir = GetDirectoryPath(outputPath);
     if (!DirectoryExists(outputDir))
     {
         ERROR("Output directory does not exist (%s).", outputDir);
-        return 4;
+        return 3;
     }
     const char *outputName = GetFileNameWithoutExt(outputPath);
     if (!IsFileNameValid(outputName))
     {
         ERROR("Output filename is invalid (%s).", outputName);
+        return 4;
+    }
+    char outputType = getDropdownValue(DROPDOWN_ID_OUTPUT_TYPE)[0];
+    const char *outputExt = GetFileExtension(outputPath);
+    switch (outputType)
+    {
+    case 'v':
+        if (outputExt == NULL || (strcmp(outputExt, ".gif") && strcmp(outputExt, ".mkv") && strcmp(outputExt, ".mov") && strcmp(outputExt, ".mp4") && strcmp(outputExt, ".webm")))
+        {
+            LOG("VIDEO - changing ext (%s -> %s)", outputExt, defaultExtVideo);
+            outputExt = defaultExtVideo;
+        }
+        break;
+
+    case 'a':
+        if (outputExt == NULL || (strcmp(outputExt, ".wav") && strcmp(outputExt, ".wave") && strcmp(outputExt, ".mp3") && strcmp(outputExt, ".m4a") && strcmp(outputExt, ".flac") && strcmp(outputExt, ".ogg") && strcmp(outputExt, ".oga") && strcmp(outputExt, ".opus")))
+        {
+            LOG("AUDIO - changing ext (%s -> %s)", outputExt, defaultExtAudio);
+            outputExt = defaultExtAudio;
+        }
+        break;
+
+    case 'i':
+        if (outputExt == NULL || (strcmp(outputExt, ".jpg") && strcmp(outputExt, ".jpeg") && strcmp(outputExt, ".jpe") && strcmp(outputExt, ".jfif") && strcmp(outputExt, ".png") && strcmp(outputExt, ".tiff") && strcmp(outputExt, ".tif") && strcmp(outputExt, ".webp")))
+        {
+            LOG("IMAGE - changing ext (%s -> %s)", outputExt, defaultExtImage);
+            outputExt = defaultExtImage;
+        }
+        break;
+
+    default:
+        ERROR("Invalid output type selected (%c)", outputType);
         return 5;
+        break;
     }
 
+    char slash = '/';
+
+    bool outputVideo = outputType == 'v';
+    bool outputAudio = outputType == 'a' || (outputVideo && strcmp(outputExt, ".gif"));
+    bool outputImage = outputType == 'i';
+
 #ifdef _WIN32
+    const char *slashPtr = strchr(outputDir, '\\');
+    if (slashPtr != NULL)
+    {
+        slash = '\\';
+    }
+
     int ret = snprintf(
         buffer,
         sizeof(buffer),
-        "ffmpeg -v error -y -i \"%s\" -vf \""
-        "fps=%s,"
-        "trim=%s:%s,"
-        "setpts=(PTS-STARTPTS)/%s,"
-        "scale=%s:%s,"
-        "crop=%s:%s:%s:%s\" "
-        "\"%s\"",
-        inputPath,
-        getTextboxValue(TEXTBOX_ID_FPS),
-        getTextboxValue(TEXTBOX_ID_DURATION_START_VIDEO),
-        getTextboxValue(TEXTBOX_ID_DURATION_END_VIDEO),
-        getTextboxValue(TEXTBOX_ID_SPEED_VIDEO),
-        getTextboxValue(TEXTBOX_ID_SCALE_W),
-        getTextboxValue(TEXTBOX_ID_SCALE_H),
-        getTextboxValue(TEXTBOX_ID_CROP_W),
-        getTextboxValue(TEXTBOX_ID_CROP_H),
-        getTextboxValue(TEXTBOX_ID_CROP_X),
-        getTextboxValue(TEXTBOX_ID_CROP_Y),
-        outputPath);
+        "ffmpeg -v error -progress pipe:1 -y -i \"%s\" -filter_complex \"",
+        streamData.inputPath);
+    if (outputVideo)
+    {
+        bool burnSubtitles = getDropdownValue(DROPDOWN_ID_SUBTITLES)[0] != '\0';
+        ret += snprintf(
+            buffer + ret,
+            sizeof(buffer) - ret,
+            "[0:v]fps=%s,trim=%s:%s,setpts=(PTS-STARTPTS)/%s,crop=%s:%s:%s:%s,scale=%s:%s%s%s%s[out_v];",
+            getTextboxValue(TEXTBOX_ID_FPS),
+            getTextboxValue(TEXTBOX_ID_DURATION_START_VIDEO),
+            getTextboxValue(TEXTBOX_ID_DURATION_END_VIDEO)[0] == 'e' ? "" : getTextboxValue(TEXTBOX_ID_DURATION_END_VIDEO),
+            getTextboxValue(TEXTBOX_ID_SPEED_VIDEO),
+            getTextboxValue(TEXTBOX_ID_CROP_W),
+            getTextboxValue(TEXTBOX_ID_CROP_H),
+            getTextboxValue(TEXTBOX_ID_CROP_X),
+            getTextboxValue(TEXTBOX_ID_CROP_Y),
+            getTextboxValue(TEXTBOX_ID_SCALE_W),
+            getTextboxValue(TEXTBOX_ID_SCALE_H),
+            !burnSubtitles ? "" : ",subtitles='",
+            !burnSubtitles ? "" : trim(getTextboxValue(TEXTBOX_ID_SUBTITLES_SOURCE)),
+            !burnSubtitles ? "" : "'");
+    }
+    if (outputAudio)
+    {
+        bool channelLayout = getDropdownValue(DROPDOWN_ID_CHANNEL_LAYOUT)[0] != '\0';
+        ret += snprintf(
+            buffer + ret,
+            sizeof(buffer) - ret,
+            "[0:a]atrim=%s:%s,",
+            getTextboxValue(TEXTBOX_ID_DURATION_START_AUDIO),
+            getTextboxValue(TEXTBOX_ID_DURATION_END_AUDIO)[0] == 'e' ? "" : getTextboxValue(TEXTBOX_ID_DURATION_END_AUDIO));
+
+        float multiplier = atof(getTextboxValue(TEXTBOX_ID_SPEED_AUDIO));
+        while (multiplier < 0.5)
+        {
+            ret += snprintf(buffer + ret, sizeof(buffer) - ret, "atempo=0.5,");
+            multiplier *= 2;
+        }
+        ret += snprintf(buffer + ret, sizeof(buffer) - ret, "atempo=%f,", multiplier);
+
+        ret += snprintf(
+            buffer + ret,
+            sizeof(buffer) - ret,
+            "adelay=%s:1%s,aformat=%s%s[out_a]",
+            getTextboxValue(TEXTBOX_ID_DELAY),
+            getDropdownValue(DROPDOWN_ID_LOUDNORM_ENABLE)[0] == '\0' ? "" : ",loudnorm",
+            !channelLayout ? "" : "channel_layouts=",
+            !channelLayout ? "" : getDropdownValue(DROPDOWN_ID_CHANNEL_LAYOUT));
+    }
+    if (outputImage)
+    {
+        ret += snprintf(
+            buffer + ret,
+            sizeof(buffer) - ret,
+            "[0:v]crop=%s:%s:%s:%s,scale=%s:%s[out_v]",
+            getTextboxValue(TEXTBOX_ID_CROP_W),
+            getTextboxValue(TEXTBOX_ID_CROP_H),
+            getTextboxValue(TEXTBOX_ID_CROP_X),
+            getTextboxValue(TEXTBOX_ID_CROP_Y),
+            getTextboxValue(TEXTBOX_ID_SCALE_W),
+            getTextboxValue(TEXTBOX_ID_SCALE_H));
+    }
+    ret += snprintf(
+        buffer + ret,
+        sizeof(buffer) - ret,
+        "\" %s %s %s \"%s%c%s%s\"",
+        outputVideo || outputImage ? "-map \"[out_v]\"" : "",
+        outputAudio ? "-map \"[out_a]\"" : "",
+        outputImage ? "-vframes 1" : "",
+        outputDir, slash, outputName, outputExt);
 
     if (ret < 0 || ret >= sizeof(buffer))
     {
         ERROR("Failed to write command into buffer.");
-        return 5;
+        return 6;
     }
 
     LOG("cmd = \"%s\"", buffer);
@@ -645,42 +740,56 @@ void HandleLoadPreviewButtonInteraction(
             ERROR("Failed to read command output.");
             return;
         }
-        // LOG("%d,%d", width, height);
 
-        // LOG("%s,%s", getTextboxValue(TEXTBOX_ID_SCALE_W), getTextboxValue(TEXTBOX_ID_SCALE_H));
-        int scaledWidth = atoi(getTextboxValue(TEXTBOX_ID_SCALE_W));
-        int scaledHeight = atoi(getTextboxValue(TEXTBOX_ID_SCALE_H));
-        if (scaledWidth == -1 && scaledHeight == -1)
+        int cropWidth = atoi(getTextboxValue(TEXTBOX_ID_CROP_W));
+        int cropHeight = atoi(getTextboxValue(TEXTBOX_ID_CROP_H));
+        if (cropWidth == 0)
         {
-            ERROR("Both scaled dimensions are -1.");
+            cropWidth = width;
+        }
+        if (cropHeight == 0)
+        {
+            cropHeight = height;
+        }
+
+        int cropOffsetX = atoi(getTextboxValue(TEXTBOX_ID_CROP_X));
+        int cropOffsetY = atoi(getTextboxValue(TEXTBOX_ID_CROP_Y));
+
+        int scaleWidth = atoi(getTextboxValue(TEXTBOX_ID_SCALE_W));
+        int scaleHeight = atoi(getTextboxValue(TEXTBOX_ID_SCALE_H));
+        if (scaleWidth == -1 && scaleHeight == -1)
+        {
+            ERROR("Both scale dimensions are -1.");
             return;
         }
-        if (scaledWidth == -1)
+        if (scaleWidth == -1)
         {
-            scaledWidth = width * scaledHeight / height;
+            scaleWidth = width * scaleHeight / height;
         }
-        else if (scaledWidth == 0)
+        else if (scaleWidth == 0)
         {
-            scaledWidth = width;
+            scaleWidth = cropWidth;
         }
-        if (scaledHeight == -1)
+        if (scaleHeight == -1)
         {
-            scaledHeight = height * scaledWidth / width;
+            scaleHeight = height * scaleWidth / width;
         }
-        else if (scaledHeight == 0)
+        else if (scaleHeight == 0)
         {
-            scaledHeight = height;
+            scaleHeight = cropHeight;
         }
 
-        // LOG("scaledWidth = %d, scaledHeight = %d", scaledWidth, scaledHeight);
         ret = snprintf(
             buffer,
             sizeof(buffer),
-            "ffmpeg -v error -i \"%s\" -vf \"scale=%d:%d\" -vframes 1 -f rawvideo -pix_fmt rgba -",
+            "ffmpeg -v error -i \"%s\" -vf \"crop=%d:%d:%d:%d,scale=%d:%d\" -vframes 1 -f rawvideo -pix_fmt rgba -",
             streamData.inputPath,
-            scaledWidth,
-            scaledHeight);
-        // LOG("Command: %s", buffer);
+            cropWidth,
+            cropHeight,
+            cropOffsetX,
+            cropOffsetY,
+            scaleWidth,
+            scaleHeight);
 
         if (ret < 0 || ret >= sizeof(buffer))
         {
@@ -688,15 +797,14 @@ void HandleLoadPreviewButtonInteraction(
             return;
         }
 
-        size_t imageBufferSize = scaledWidth * scaledHeight * 4;
-        // LOG("imageBufferSize = %zu", imageBufferSize);
+        size_t imageBufferSize = scaleWidth * scaleHeight * 4;
         unsigned char *imageBuffer = calloc(imageBufferSize, sizeof(unsigned char));
         size_t totalBytesRead = 0;
 
 #ifdef _WIN32
         // Create read/write pipes
         HANDLE hStdOutRead, hStdOutWrite;
-        // HANDLE hStdErrRead, hStdErrWrite;
+        HANDLE hStdErrRead, hStdErrWrite;
 
         SECURITY_ATTRIBUTES sa;
         sa.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -704,7 +812,7 @@ void HandleLoadPreviewButtonInteraction(
         sa.lpSecurityDescriptor = NULL;
 
         CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 0);
-        // CreatePipe(&hStdErrRead, &hStdErrWrite, &sa, 0);
+        CreatePipe(&hStdErrRead, &hStdErrWrite, &sa, 0);
 
         // Create child process
         STARTUPINFO si;
@@ -712,14 +820,14 @@ void HandleLoadPreviewButtonInteraction(
         si.cb = sizeof(si);
         si.dwFlags |= STARTF_USESTDHANDLES;
         si.hStdOutput = hStdOutWrite;
-        // si.hStdError = hStdErrWrite;
+        si.hStdError = hStdErrWrite;
 
         PROCESS_INFORMATION pi = {0};
         CreateProcess(NULL, buffer, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
 
         // Close write handles in parent
         CloseHandle(hStdOutWrite);
-        // CloseHandle(hStdErrWrite);
+        CloseHandle(hStdErrWrite);
 
         // Read from stdout
         DWORD nBytesRead;
@@ -727,38 +835,44 @@ void HandleLoadPreviewButtonInteraction(
         {
             ReadFile(hStdOutRead, imageBuffer + totalBytesRead, imageBufferSize - totalBytesRead, &nBytesRead, NULL);
             totalBytesRead += nBytesRead;
-            // LOG("nBytesRead = %zu, total = %zu", nBytesRead, total);
         } while (nBytesRead > 0);
 
-        // size_t errBufferSize = 20000;
-        // unsigned char *errBuffer = calloc(errBufferSize, sizeof(unsigned char));
-        // DWORD nErrBytesRead;
-        // ReadFile(hStdErrRead, errBuffer, errBufferSize, &nErrBytesRead, NULL);
-        // if (nErrBytesRead > 0)
-        // {
-        //     ERROR("%s", errBuffer);
-        // }
+        unsigned char errBuffer[1024] = {0};
+        DWORD nErrBytesRead;
+        ReadFile(hStdErrRead, errBuffer, sizeof(errBuffer), &nErrBytesRead, NULL);
+        if (nErrBytesRead > 0)
+        {
+            ERROR("%s", errBuffer);
+            free(imageBuffer);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            CloseHandle(hStdOutRead);
+            CloseHandle(hStdErrRead);
+            return;
+        }
 
-        // size_t errTotal = 0;
-        // do
-        // {
-        //     ReadFile(hStdOutRead, errBuffer + errTotal, errBufferSize - errTotal, &nErrBytesRead, NULL);
-        // } while (nErrBytesRead > 0);
-        // if (errTotal > 0)
-        // {
-        //     ERROR("Received more bytes than expected (>=%zu).", errTotal);
-        //     free(imageBuffer);
-        //     free(errBuffer);
-        //     return;
-        // }
-        // free(errBuffer);
+        size_t overflow = 0;
+        do
+        {
+            ReadFile(hStdOutRead, errBuffer + overflow, sizeof(errBuffer) - overflow, &nErrBytesRead, NULL);
+        } while (nErrBytesRead > 0);
+        if (overflow > 0)
+        {
+            ERROR("Received more bytes than expected (>=%zu).", overflow);
+            free(imageBuffer);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            CloseHandle(hStdOutRead);
+            CloseHandle(hStdErrRead);
+            return;
+        }
 
         // Wait for child process to exit and close handles
         WaitForSingleObject(pi.hProcess, INFINITE);
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         CloseHandle(hStdOutRead);
-        // CloseHandle(hStdErrRead);
+        CloseHandle(hStdErrRead);
 #else
         // fp = popen(buffer, "r");
         // if (fp == NULL)
@@ -785,8 +899,8 @@ void HandleLoadPreviewButtonInteraction(
 
         Image image = {
             .data = imageBuffer,
-            .width = scaledWidth,
-            .height = scaledHeight,
+            .width = scaleWidth,
+            .height = scaleHeight,
             .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
             .mipmaps = 1,
         };
@@ -866,19 +980,16 @@ void HandleBrowseButtonInteraction(
             switch (outputType)
             {
             case 'v':
-                LOG("VIDEO");
                 outputFilters = videoFilters;
                 filterCount = sizeof(videoFilters) / sizeof(videoFilters[0]);
                 break;
 
             case 'a':
-                LOG("AUDIO");
                 outputFilters = audioFilters;
                 filterCount = sizeof(audioFilters) / sizeof(audioFilters[0]);
                 break;
 
             case 'i':
-                LOG("IMAGE");
                 outputFilters = imageFilters;
                 filterCount = sizeof(imageFilters) / sizeof(imageFilters[0]);
                 break;
@@ -1470,535 +1581,605 @@ void RenderScrollBar(ScrollID scrollId, bool vertical, bool horizontal)
     }
 }
 
-void RenderTabContentDimensions()
+void RenderTabContentDimensions(bool visible)
 {
-    CLAY(styleFilters)
+    Clay_ElementDeclaration wrapperConfig = visible
+                                                ? (Clay_ElementDeclaration){
+                                                      .layout = {
+                                                          .sizing = {
+                                                              .width = CLAY_SIZING_GROW(0),
+                                                              .height = CLAY_SIZING_GROW(0),
+                                                          },
+                                                          .childGap = fontData.charWidth * 4,
+                                                      }}
+                                                : (Clay_ElementDeclaration){
+                                                      .floating = {
+                                                          .offset = {.x = GetScreenWidth()},
+                                                          .attachTo = CLAY_ATTACH_TO_ROOT,
+                                                      },
+                                                  };
+    CLAY(wrapperConfig)
     {
-        CLAY(styleFilterGroup)
+        CLAY(styleFilters)
         {
-            CLAY_TEXT(CLAY_STRING("Scale"), TEXT_CONFIG_BOLD);
-
-            CLAY(styleFilterItemGroup)
+            CLAY(styleFilterGroup)
             {
-                CLAY(styleFilterItem)
+                CLAY_TEXT(CLAY_STRING("Crop"), TEXT_CONFIG_BOLD);
+
+                CLAY(styleFilterItemGroup)
                 {
-                    CLAY(styleFilterItemLabel)
+                    CLAY(styleFilterItem)
                     {
-                        CLAY_TEXT(CLAY_STRING("width:"), TEXT_CONFIG_BOLD);
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("width:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_CROP_W,
+                                (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 1, .max = FLOAT_MAX},
+                                !visible,
+                                6,
+                                "in_w");
+                        }
                     }
-                    CLAY(styleFilterItemField)
+                    CLAY(styleFilterItem)
                     {
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_SCALE_W,
-                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-                            false,
-                            6,
-                            textboxData.textboxBuffers[TEXTBOX_ID_SCALE_H].chars[0] == '\0' ? "in_w" : "-1");
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("height:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_CROP_H,
+                                (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 1, .max = FLOAT_MAX},
+                                !visible,
+                                6,
+                                "in_h");
+                        }
+                    }
+                    CLAY(styleFilterItem)
+                    {
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("x-offset:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_CROP_X,
+                                (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                !visible,
+                                6,
+                                "0");
+                        }
+                    }
+                    CLAY(styleFilterItem)
+                    {
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("y-offset:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_CROP_Y,
+                                (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                !visible,
+                                6,
+                                "0");
+                        }
                     }
                 }
-                CLAY(styleFilterItem)
+            }
+
+            CLAY(styleFilterGroup)
+            {
+                CLAY_TEXT(CLAY_STRING("Scale"), TEXT_CONFIG_BOLD);
+
+                CLAY(styleFilterItemGroup)
                 {
-                    CLAY(styleFilterItemLabel)
+                    CLAY(styleFilterItem)
                     {
-                        CLAY_TEXT(CLAY_STRING("height:"), TEXT_CONFIG_BOLD);
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("width:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_SCALE_W,
+                                (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                !visible,
+                                6,
+                                textboxData.textboxBuffers[TEXTBOX_ID_SCALE_H].chars[0] == '\0' ? "in_w" : "-1");
+                        }
                     }
-                    CLAY(styleFilterItemField)
+                    CLAY(styleFilterItem)
                     {
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_SCALE_H,
-                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-                            false,
-                            6,
-                            textboxData.textboxBuffers[TEXTBOX_ID_SCALE_W].chars[0] == '\0' ? "in_h" : "-1");
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("height:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_SCALE_H,
+                                (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
+                                !visible,
+                                6,
+                                textboxData.textboxBuffers[TEXTBOX_ID_SCALE_W].chars[0] == '\0' ? "in_h" : "-1");
+                        }
                     }
                 }
             }
         }
 
-        CLAY(styleFilterGroup)
+        CLAY({
+            .layout = {
+                .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                .childGap = fontData.charHeight,
+            },
+        })
         {
-            CLAY_TEXT(CLAY_STRING("Crop"), TEXT_CONFIG_BOLD);
+            bool imageLoaded = visible && previewImageData.imageTexture.id > 0;
 
-            CLAY(styleFilterItemGroup)
-            {
-                CLAY(styleFilterItem)
-                {
-                    CLAY(styleFilterItemLabel)
-                    {
-                        CLAY_TEXT(CLAY_STRING("width:"), TEXT_CONFIG_BOLD);
-                    }
-                    CLAY(styleFilterItemField)
-                    {
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_CROP_W,
-                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-                            false,
-                            6,
-                            "in_w");
-                    }
-                }
-                CLAY(styleFilterItem)
-                {
-                    CLAY(styleFilterItemLabel)
-                    {
-                        CLAY_TEXT(CLAY_STRING("height:"), TEXT_CONFIG_BOLD);
-                    }
-                    CLAY(styleFilterItemField)
-                    {
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_CROP_H,
-                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-                            false,
-                            6,
-                            "in_h");
-                    }
-                }
-                CLAY(styleFilterItem)
-                {
-                    CLAY(styleFilterItemLabel)
-                    {
-                        CLAY_TEXT(CLAY_STRING("x-offset:"), TEXT_CONFIG_BOLD);
-                    }
-                    CLAY(styleFilterItemField)
-                    {
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_CROP_X,
-                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-                            false,
-                            6,
-                            "0");
-                    }
-                }
-                CLAY(styleFilterItem)
-                {
-                    CLAY(styleFilterItemLabel)
-                    {
-                        CLAY_TEXT(CLAY_STRING("y-offset:"), TEXT_CONFIG_BOLD);
-                    }
-                    CLAY(styleFilterItemField)
-                    {
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_CROP_Y,
-                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = FLOAT_MAX},
-                            false,
-                            6,
-                            "0");
-                    }
-                }
-            }
-        }
-    }
-
-    CLAY({
-        .layout = {
-            .layoutDirection = CLAY_TOP_TO_BOTTOM,
-            .childGap = fontData.charHeight,
-        },
-    })
-    {
-        bool imageLoaded = previewImageData.imageTexture.id > 0;
-
-        CLAY({.layout = {.childGap = fontData.charWidth}})
-        {
-            RenderButton(
-                CLAY_STRING("Load Preview"),
-                BUTTON_ID_LOAD_PREVIEW,
-                false,
-                HandleLoadPreviewButtonInteraction,
-                0,
-                buttonPadding);
-
-            CLAY({.layout = {.childGap = fontData.charHeightOverFour}})
+            CLAY({.layout = {.childGap = fontData.charWidth}})
             {
                 RenderButton(
-                    CLAY_STRING("-"),
-                    BUTTON_ID_PREVIEW_SIZE_DOWN,
-                    !imageLoaded,
-                    HandlePreviewSizeDownButtonInteraction,
+                    CLAY_STRING("Load Preview"),
+                    BUTTON_ID_LOAD_PREVIEW,
+                    !visible,
+                    HandleLoadPreviewButtonInteraction,
                     0,
-                    defaultBoxPadding);
+                    buttonPadding);
 
-                RenderButton(
-                    CLAY_STRING("+"),
-                    BUTTON_ID_PREVIEW_SIZE_UP,
-                    !imageLoaded,
-                    HandlePreviewSizeUpButtonInteraction,
-                    0,
-                    defaultBoxPadding);
+                CLAY({.layout = {.childGap = fontData.charHeightOverFour}})
+                {
+                    RenderButton(
+                        CLAY_STRING("-"),
+                        BUTTON_ID_PREVIEW_SIZE_DOWN,
+                        !imageLoaded,
+                        HandlePreviewSizeDownButtonInteraction,
+                        0,
+                        defaultBoxPadding);
+
+                    RenderButton(
+                        CLAY_STRING("+"),
+                        BUTTON_ID_PREVIEW_SIZE_UP,
+                        !imageLoaded,
+                        HandlePreviewSizeUpButtonInteraction,
+                        0,
+                        defaultBoxPadding);
+                }
             }
-        }
 
-        if (imageLoaded)
-        {
-            float previewWidth = previewImageData.imageTexture.width > previewImageData.imageTexture.height
-                                     ? previewImageData.imageSize
-                                     : previewImageData.imageTexture.width * previewImageData.imageSize / previewImageData.imageTexture.height;
-            float previewHeight = previewImageData.imageTexture.height > previewImageData.imageTexture.width
-                                      ? previewImageData.imageSize
-                                      : previewImageData.imageTexture.height * previewImageData.imageSize / previewImageData.imageTexture.width;
-            CLAY({
-                .layout = {
-                    .sizing = {
-                        .width = CLAY_SIZING_FIXED(previewWidth),
-                        .height = CLAY_SIZING_FIXED(previewHeight),
+            if (imageLoaded)
+            {
+                float previewWidth = previewImageData.imageTexture.width > previewImageData.imageTexture.height
+                                         ? previewImageData.imageSize
+                                         : previewImageData.imageTexture.width * previewImageData.imageSize / previewImageData.imageTexture.height;
+                float previewHeight = previewImageData.imageTexture.height > previewImageData.imageTexture.width
+                                          ? previewImageData.imageSize
+                                          : previewImageData.imageTexture.height * previewImageData.imageSize / previewImageData.imageTexture.width;
+                CLAY({
+                    .layout = {
+                        .sizing = {
+                            .width = CLAY_SIZING_FIXED(previewWidth),
+                            .height = CLAY_SIZING_FIXED(previewHeight),
+                        },
                     },
-                },
-                .image = {
-                    .imageData = &previewImageData.imageTexture,
-                },
-            })
-            {
-            }
-        }
-    }
-}
-
-void RenderTabContentVideo()
-{
-    CLAY(styleFilters)
-    {
-        CLAY(styleFilterGroup)
-        {
-            CLAY_TEXT(CLAY_STRING("FPS"), TEXT_CONFIG_BOLD);
-
-            CLAY(styleFilterItemGroup)
-            {
-                CLAY(styleFilterItem)
+                    .image = {
+                        .imageData = &previewImageData.imageTexture,
+                    },
+                })
                 {
-                    CLAY(styleFilterItemLabel)
-                    {
-                        CLAY_TEXT(CLAY_STRING("fps:"), TEXT_CONFIG_BOLD);
-                    }
-                    CLAY(styleFilterItemField)
-                    {
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_FPS,
-                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 1, .max = 120},
-                            false,
-                            3,
-                            "30");
-                    }
-                }
-            }
-        }
-
-        CLAY(styleFilterGroup)
-        {
-            CLAY_TEXT(CLAY_STRING("Duration"), TEXT_CONFIG_BOLD);
-
-            CLAY(styleFilterItemGroup)
-            {
-                CLAY(styleFilterItem)
-                {
-                    CLAY(styleFilterItemLabel)
-                    {
-                        CLAY_TEXT(CLAY_STRING("start:"), TEXT_CONFIG_BOLD);
-                    }
-                    CLAY(styleFilterItemField)
-                    {
-                        const char *startAudio = textboxData.textboxBuffers[TEXTBOX_ID_DURATION_START_AUDIO].chars;
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_DURATION_START_VIDEO,
-                            (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
-                            false,
-                            6,
-                            startAudio[0] == '\0' ? "0.0" : startAudio);
-                    }
-                }
-                CLAY(styleFilterItem)
-                {
-                    CLAY(styleFilterItemLabel)
-                    {
-                        CLAY_TEXT(CLAY_STRING("end:"), TEXT_CONFIG_BOLD);
-                    }
-                    CLAY(styleFilterItemField)
-                    {
-                        const char *endAudio = textboxData.textboxBuffers[TEXTBOX_ID_DURATION_END_AUDIO].chars;
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_DURATION_END_VIDEO,
-                            (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
-                            false,
-                            6,
-                            endAudio[0] == '\0' ? "end" : endAudio);
-                    }
-                }
-            }
-        }
-
-        CLAY(styleFilterGroup)
-        {
-            CLAY_TEXT(CLAY_STRING("Playback Speed"), TEXT_CONFIG_BOLD);
-
-            CLAY(styleFilterItemGroup)
-            {
-                CLAY(styleFilterItem)
-                {
-                    CLAY(styleFilterItemLabel)
-                    {
-                        CLAY_TEXT(CLAY_STRING("multiplier:"), TEXT_CONFIG_BOLD);
-                    }
-                    CLAY(styleFilterItemField)
-                    {
-                        const char *speedAudio = textboxData.textboxBuffers[TEXTBOX_ID_SPEED_AUDIO].chars;
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_SPEED_VIDEO,
-                            (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
-                            false,
-                            4,
-                            speedAudio[0] == '\0' ? "1.0" : speedAudio);
-                    }
                 }
             }
         }
     }
 }
 
-void RenderTabContentAudio()
+void RenderTabContentVideo(bool visible)
 {
-    CLAY(styleFilters)
+    Clay_ElementDeclaration wrapperConfig = visible
+                                                ? (Clay_ElementDeclaration){
+                                                      .layout = {
+                                                          .sizing = {
+                                                              .width = CLAY_SIZING_GROW(0),
+                                                              .height = CLAY_SIZING_GROW(0),
+                                                          },
+                                                      }}
+                                                : (Clay_ElementDeclaration){
+                                                      .floating = {
+                                                          .offset = {.x = GetScreenWidth()},
+                                                          .attachTo = CLAY_ATTACH_TO_ROOT,
+                                                      },
+                                                  };
+    CLAY(wrapperConfig)
     {
-        CLAY(styleFilterGroup)
+        CLAY(styleFilters)
         {
-            CLAY_TEXT(CLAY_STRING("Volume"), TEXT_CONFIG_BOLD);
-
-            CLAY(styleFilterItemGroup)
+            CLAY(styleFilterGroup)
             {
-                CLAY(styleFilterItem)
+                CLAY_TEXT(CLAY_STRING("FPS"), TEXT_CONFIG_BOLD);
+
+                CLAY(styleFilterItemGroup)
                 {
-                    CLAY(styleFilterItemLabel)
+                    CLAY(styleFilterItem)
                     {
-                        CLAY_TEXT(CLAY_STRING("multiplier:"), TEXT_CONFIG_BOLD);
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("fps:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_FPS,
+                                (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 1, .max = 120},
+                                !visible,
+                                3,
+                                "30");
+                        }
                     }
-                    CLAY(styleFilterItemField)
+                }
+            }
+
+            CLAY(styleFilterGroup)
+            {
+                CLAY_TEXT(CLAY_STRING("Duration"), TEXT_CONFIG_BOLD);
+
+                CLAY(styleFilterItemGroup)
+                {
+                    CLAY(styleFilterItem)
                     {
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_VOLUME,
-                            (NumberboxConfig){.isNumberbox = true, .min = 0, .max = 3},
-                            false,
-                            4,
-                            "1.0");
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("start:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            const char *startAudio = textboxData.textboxBuffers[TEXTBOX_ID_DURATION_START_AUDIO].chars;
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_DURATION_START_VIDEO,
+                                (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
+                                !visible,
+                                6,
+                                startAudio[0] == '\0' ? "0.0" : startAudio);
+                        }
+                    }
+                    CLAY(styleFilterItem)
+                    {
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("end:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            const char *endAudio = textboxData.textboxBuffers[TEXTBOX_ID_DURATION_END_AUDIO].chars;
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_DURATION_END_VIDEO,
+                                (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
+                                !visible,
+                                6,
+                                endAudio[0] == '\0' ? "end" : endAudio);
+                        }
+                    }
+                }
+            }
+
+            CLAY(styleFilterGroup)
+            {
+                CLAY_TEXT(CLAY_STRING("Playback Speed"), TEXT_CONFIG_BOLD);
+
+                CLAY(styleFilterItemGroup)
+                {
+                    CLAY(styleFilterItem)
+                    {
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("multiplier:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            const char *speedAudio = textboxData.textboxBuffers[TEXTBOX_ID_SPEED_AUDIO].chars;
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_SPEED_VIDEO,
+                                (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
+                                !visible,
+                                4,
+                                speedAudio[0] == '\0' ? "1.0" : speedAudio);
+                        }
                     }
                 }
             }
         }
+    }
+}
 
-        CLAY(styleFilterGroup)
+void RenderTabContentAudio(bool visible)
+{
+    Clay_ElementDeclaration wrapperConfig = visible
+                                                ? (Clay_ElementDeclaration){
+                                                      .layout = {
+                                                          .sizing = {
+                                                              .width = CLAY_SIZING_GROW(0),
+                                                              .height = CLAY_SIZING_GROW(0),
+                                                          },
+                                                      }}
+                                                : (Clay_ElementDeclaration){
+                                                      .floating = {
+                                                          .offset = {.x = GetScreenWidth()},
+                                                          .attachTo = CLAY_ATTACH_TO_ROOT,
+                                                      },
+                                                  };
+    CLAY(wrapperConfig)
+    {
+        CLAY(styleFilters)
         {
-            CLAY_TEXT(CLAY_STRING("Duration"), TEXT_CONFIG_BOLD);
-
-            CLAY(styleFilterItemGroup)
+            CLAY(styleFilterGroup)
             {
-                CLAY(styleFilterItem)
+                CLAY_TEXT(CLAY_STRING("Volume"), TEXT_CONFIG_BOLD);
+
+                CLAY(styleFilterItemGroup)
                 {
-                    CLAY(styleFilterItemLabel)
+                    CLAY(styleFilterItem)
                     {
-                        CLAY_TEXT(CLAY_STRING("start:"), TEXT_CONFIG_BOLD);
-                    }
-                    CLAY(styleFilterItemField)
-                    {
-                        const char *startVideo = textboxData.textboxBuffers[TEXTBOX_ID_DURATION_START_VIDEO].chars;
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_DURATION_START_AUDIO,
-                            (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
-                            false,
-                            6,
-                            startVideo[0] == '\0' ? "0.0" : startVideo);
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("multiplier:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_VOLUME,
+                                (NumberboxConfig){.isNumberbox = true, .min = 0, .max = 3},
+                                !visible,
+                                4,
+                                "1.0");
+                        }
                     }
                 }
-                CLAY(styleFilterItem)
+            }
+
+            CLAY(styleFilterGroup)
+            {
+                CLAY_TEXT(CLAY_STRING("Duration"), TEXT_CONFIG_BOLD);
+
+                CLAY(styleFilterItemGroup)
                 {
-                    CLAY(styleFilterItemLabel)
+                    CLAY(styleFilterItem)
                     {
-                        CLAY_TEXT(CLAY_STRING("end:"), TEXT_CONFIG_BOLD);
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("start:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            const char *startVideo = textboxData.textboxBuffers[TEXTBOX_ID_DURATION_START_VIDEO].chars;
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_DURATION_START_AUDIO,
+                                (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
+                                !visible,
+                                6,
+                                startVideo[0] == '\0' ? "0.0" : startVideo);
+                        }
                     }
-                    CLAY(styleFilterItemField)
+                    CLAY(styleFilterItem)
                     {
-                        const char *endVideo = textboxData.textboxBuffers[TEXTBOX_ID_DURATION_END_VIDEO].chars;
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_DURATION_END_AUDIO,
-                            (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
-                            false,
-                            6,
-                            endVideo[0] == '\0' ? "end" : endVideo);
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("end:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            const char *endVideo = textboxData.textboxBuffers[TEXTBOX_ID_DURATION_END_VIDEO].chars;
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_DURATION_END_AUDIO,
+                                (NumberboxConfig){.isNumberbox = true, .min = 0, .max = FLOAT_MAX},
+                                !visible,
+                                6,
+                                endVideo[0] == '\0' ? "end" : endVideo);
+                        }
+                    }
+                }
+            }
+
+            CLAY(styleFilterGroup)
+            {
+                CLAY_TEXT(CLAY_STRING("Playback Speed"), TEXT_CONFIG_BOLD);
+
+                CLAY(styleFilterItemGroup)
+                {
+                    CLAY(styleFilterItem)
+                    {
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("multiplier:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            const char *speedVideo = textboxData.textboxBuffers[TEXTBOX_ID_SPEED_VIDEO].chars;
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_SPEED_AUDIO,
+                                (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
+                                !visible,
+                                4,
+                                speedVideo[0] == '\0' ? "1.0" : speedVideo);
+                        }
+                    }
+                }
+            }
+
+            CLAY(styleFilterGroup)
+            {
+                CLAY_TEXT(CLAY_STRING("Delay"), TEXT_CONFIG_BOLD);
+
+                CLAY(styleFilterItemGroup)
+                {
+                    CLAY(styleFilterItem)
+                    {
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("delay (ms):"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_DELAY,
+                                (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = 10000},
+                                !visible,
+                                5,
+                                "0");
+                        }
+                    }
+                }
+            }
+
+            CLAY(styleFilterGroup)
+            {
+                CLAY_TEXT(CLAY_STRING("Loudness Normalization"), TEXT_CONFIG_BOLD);
+
+                CLAY(styleFilterItemGroup)
+                {
+                    CLAY(styleFilterItem)
+                    {
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("enable:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            RenderDropdown(
+                                CLAY_STRING(""),
+                                DROPDOWN_ID_LOUDNORM_ENABLE,
+                                (DropdownOption[]){
+                                    {"Disable", ""},
+                                    {"Enable", "enable"},
+                                    DROPDOWN_OPTION_NULL,
+                                });
+                        }
+                    }
+                }
+            }
+
+            CLAY(styleFilterGroup)
+            {
+                CLAY_TEXT(CLAY_STRING("Format"), TEXT_CONFIG_BOLD);
+
+                CLAY(styleFilterItemGroup)
+                {
+                    CLAY(styleFilterItem)
+                    {
+                        CLAY(styleFilterItemLabel)
+                        {
+                            CLAY_TEXT(CLAY_STRING("channel layout:"), TEXT_CONFIG_BOLD);
+                        }
+                        CLAY(styleFilterItemField)
+                        {
+                            RenderDropdown(CLAY_STRING(""),
+                                           DROPDOWN_ID_CHANNEL_LAYOUT,
+                                           (DropdownOption[]){
+                                               DROPDOWN_OPTION_UNSELECTED,
+                                               {"Stereo", "stereo"},
+                                               {"Mono", "mono"},
+                                               DROPDOWN_OPTION_NULL,
+                                           });
+                        }
                     }
                 }
             }
         }
+    }
+}
 
-        CLAY(styleFilterGroup)
+void RenderTabContentSubtitles(bool visible)
+{
+    Clay_ElementDeclaration wrapperConfig = visible
+                                                ? (Clay_ElementDeclaration){
+                                                      .layout = {
+                                                          .sizing = {
+                                                              .width = CLAY_SIZING_GROW(0),
+                                                              .height = CLAY_SIZING_GROW(0),
+                                                          },
+                                                      }}
+                                                : (Clay_ElementDeclaration){
+                                                      .floating = {
+                                                          .offset = {.x = GetScreenWidth()},
+                                                          .attachTo = CLAY_ATTACH_TO_ROOT,
+                                                      },
+                                                  };
+    CLAY(wrapperConfig)
+    {
+        CLAY(styleFilters)
         {
-            CLAY_TEXT(CLAY_STRING("Playback Speed"), TEXT_CONFIG_BOLD);
-
-            CLAY(styleFilterItemGroup)
+            CLAY(styleFilterGroup)
             {
+                CLAY_TEXT(CLAY_STRING("Subtitles"), TEXT_CONFIG_BOLD);
+
                 CLAY(styleFilterItem)
                 {
                     CLAY(styleFilterItemLabel)
                     {
-                        CLAY_TEXT(CLAY_STRING("multiplier:"), TEXT_CONFIG_BOLD);
-                    }
-                    CLAY(styleFilterItemField)
-                    {
-                        const char *speedVideo = textboxData.textboxBuffers[TEXTBOX_ID_SPEED_VIDEO].chars;
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_SPEED_AUDIO,
-                            (NumberboxConfig){.isNumberbox = true, .min = 0.01, .max = 100},
-                            false,
-                            4,
-                            speedVideo[0] == '\0' ? "1.0" : speedVideo);
-                    }
-                }
-            }
-        }
-
-        CLAY(styleFilterGroup)
-        {
-            CLAY_TEXT(CLAY_STRING("Delay"), TEXT_CONFIG_BOLD);
-
-            CLAY(styleFilterItemGroup)
-            {
-                CLAY(styleFilterItem)
-                {
-                    CLAY(styleFilterItemLabel)
-                    {
-                        CLAY_TEXT(CLAY_STRING("delay (ms):"), TEXT_CONFIG_BOLD);
-                    }
-                    CLAY(styleFilterItemField)
-                    {
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_DELAY,
-                            (NumberboxConfig){.isNumberbox = true, .isInt = true, .min = 0, .max = 10000},
-                            false,
-                            5,
-                            "0");
-                    }
-                }
-            }
-        }
-
-        CLAY(styleFilterGroup)
-        {
-            CLAY_TEXT(CLAY_STRING("Loudness Normalization"), TEXT_CONFIG_BOLD);
-
-            CLAY(styleFilterItemGroup)
-            {
-                CLAY(styleFilterItem)
-                {
-                    CLAY(styleFilterItemLabel)
-                    {
-                        CLAY_TEXT(CLAY_STRING("enable:"), TEXT_CONFIG_BOLD);
+                        CLAY_TEXT(CLAY_STRING("subtitles:"), TEXT_CONFIG_BOLD);
                     }
                     CLAY(styleFilterItemField)
                     {
                         RenderDropdown(
                             CLAY_STRING(""),
-                            DROPDOWN_ID_LOUDNORM_ENABLE,
+                            DROPDOWN_ID_SUBTITLES,
                             (DropdownOption[]){
-                                {"Disable", ""},
-                                {"Enable", "enable"},
+                                DROPDOWN_OPTION_UNSELECTED,
+                                {"Burn-in", "b"},
                                 DROPDOWN_OPTION_NULL,
                             });
                     }
                 }
-            }
-        }
-
-        CLAY(styleFilterGroup)
-        {
-            CLAY_TEXT(CLAY_STRING("Format"), TEXT_CONFIG_BOLD);
-
-            CLAY(styleFilterItemGroup)
-            {
                 CLAY(styleFilterItem)
                 {
+                    bool subtitles = getDropdownValue(DROPDOWN_ID_SUBTITLES)[0] != '\0';
+
                     CLAY(styleFilterItemLabel)
                     {
-                        CLAY_TEXT(CLAY_STRING("channel layout:"), TEXT_CONFIG_BOLD);
+                        CLAY_TEXT(CLAY_STRING("source file:"), TEXT_CONFIG_BOLD);
                     }
                     CLAY(styleFilterItemField)
                     {
-                        RenderDropdown(CLAY_STRING(""),
-                                       DROPDOWN_ID_CHANNEL_LAYOUT,
-                                       (DropdownOption[]){
-                                           {"Stereo", "stereo"},
-                                           {"Mono", "mono"},
-                                           DROPDOWN_OPTION_NULL,
-                                       });
-                    }
-                }
-            }
-        }
-    }
-}
+                        CLAY({.layout = {.childGap = fontData.charWidth}})
+                        {
+                            RenderTextbox(
+                                CLAY_STRING(""),
+                                TEXTBOX_ID_SUBTITLES_SOURCE,
+                                (NumberboxConfig){0},
+                                !subtitles,
+                                8,
+                                "");
 
-void RenderTabContentSubtitles()
-{
-    CLAY(styleFilters)
-    {
-        CLAY(styleFilterGroup)
-        {
-            CLAY_TEXT(CLAY_STRING("Subtitles"), TEXT_CONFIG_BOLD);
-
-            CLAY(styleFilterItem)
-            {
-                CLAY(styleFilterItemLabel)
-                {
-                    CLAY_TEXT(CLAY_STRING("subtitles:"), TEXT_CONFIG_BOLD);
-                }
-                CLAY(styleFilterItemField)
-                {
-                    RenderDropdown(
-                        CLAY_STRING(""),
-                        DROPDOWN_ID_SUBTITLES,
-                        (DropdownOption[]){
-                            DROPDOWN_OPTION_UNSELECTED,
-                            {"Burn-in", "b"},
-                            DROPDOWN_OPTION_NULL,
-                        });
-                }
-            }
-            CLAY(styleFilterItem)
-            {
-                bool subtitles = getDropdownValue(DROPDOWN_ID_SUBTITLES)[0] != '\0';
-
-                CLAY(styleFilterItemLabel)
-                {
-                    CLAY_TEXT(CLAY_STRING("source file:"), TEXT_CONFIG_BOLD);
-                }
-                CLAY(styleFilterItemField)
-                {
-                    CLAY({.layout = {.childGap = fontData.charWidth}})
-                    {
-                        RenderTextbox(
-                            CLAY_STRING(""),
-                            TEXTBOX_ID_SUBTITLES_SOURCE,
-                            (NumberboxConfig){0},
-                            !subtitles,
-                            8,
-                            "");
-
-                        RenderButton(
-                            CLAY_STRING("..."),
-                            BUTTON_ID_BROWSE_SUBTITLES_SOURCE,
-                            !subtitles,
-                            HandleBrowseButtonInteraction,
-                            TEXTBOX_ID_SUBTITLES_SOURCE,
-                            defaultBoxPadding);
+                            RenderButton(
+                                CLAY_STRING("..."),
+                                BUTTON_ID_BROWSE_SUBTITLES_SOURCE,
+                                !subtitles,
+                                HandleBrowseButtonInteraction,
+                                TEXTBOX_ID_SUBTITLES_SOURCE,
+                                defaultBoxPadding);
+                        }
                     }
                 }
             }
@@ -2093,6 +2274,15 @@ void setStyles()
 
 void LayoutCreator_Initialize()
 {
+    fontData = (FontData){
+        .fontSize = 16,
+        .fontSizeMin = 8,
+        .fontSizeMax = 32,
+        .charWidth = 8,
+        .charHeight = 16,
+        .charHeightOverFour = 4,
+    };
+
     textboxData = (TextboxData){
         .textboxBuffers = {0},
         .isInit = {0},
@@ -2353,7 +2543,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                             .height = CLAY_SIZING_GROW(0),
                         },
                         .padding = CLAY_PADDING_ALL(16),
-                        .childGap = 32,
                     },
                     .backgroundColor = COLOR_BG_TAB_SELECTED,
                     .cornerRadius = (Clay_CornerRadius){0, 0, 16, 16},
@@ -2363,31 +2552,35 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     },
                 })
                 {
-                    switch (tabData.selectedTab)
-                    {
-                    case TAB_ID_DIMENSIONS:
-                        RenderTabContentDimensions();
-                        break;
+                    // switch (tabData.selectedTab)
+                    // {
+                    // case TAB_ID_DIMENSIONS:
+                    //     RenderTabContentDimensions();
+                    //     break;
 
-                    case TAB_ID_VIDEO:
-                        RenderTabContentVideo();
-                        break;
+                    // case TAB_ID_VIDEO:
+                    //     RenderTabContentVideo();
+                    //     break;
 
-                    case TAB_ID_AUDIO:
-                        RenderTabContentAudio();
-                        break;
+                    // case TAB_ID_AUDIO:
+                    //     RenderTabContentAudio();
+                    //     break;
 
-                    case TAB_ID_SUBTITLES:
-                        RenderTabContentSubtitles();
-                        break;
+                    // case TAB_ID_SUBTITLES:
+                    //     RenderTabContentSubtitles();
+                    //     break;
 
-                    case TAB_ID_DUMMY_LAST:
-                        break;
+                    // case TAB_ID_DUMMY_LAST:
+                    //     break;
 
-                    default:
-                        ERROR("Invalid tab ID selected (%zu).", tabData.selectedTab);
-                        break;
-                    }
+                    // default:
+                    //     ERROR("Invalid tab ID selected (%zu).", tabData.selectedTab);
+                    //     break;
+                    // }
+                    RenderTabContentDimensions(tabData.selectedTab == TAB_ID_DIMENSIONS);
+                    RenderTabContentVideo(tabData.selectedTab == TAB_ID_VIDEO);
+                    RenderTabContentAudio(tabData.selectedTab == TAB_ID_AUDIO);
+                    RenderTabContentSubtitles(tabData.selectedTab == TAB_ID_SUBTITLES);
                 }
             }
 

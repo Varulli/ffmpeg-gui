@@ -38,27 +38,6 @@ void HandleClayErrors(Clay_ErrorData errorData)
     ERROR("%s", errorData.errorText.chars);
 }
 
-void InitializeLayout(Clay_Context *context)
-{
-    LayoutCreator_Initialize();
-
-    Clay_SetCurrentContext(context);
-    Clay_SetLayoutDimensions((Clay_Dimensions){
-        .width = GetScreenWidth(),
-        .height = GetScreenHeight(),
-    });
-    Clay_SetPointerState(
-        (Clay_Vector2){0, 0},
-        0);
-
-    Clay_BeginLayout();
-    RenderTabContentDimensions();
-    RenderTabContentVideo();
-    RenderTabContentAudio();
-    RenderTabContentSubtitles();
-    Clay_EndLayout();
-}
-
 Clay_RenderCommandArray CreateLayout(Clay_Context *context)
 {
     Clay_SetCurrentContext(context);
@@ -83,14 +62,7 @@ int main(void)
 {
     Clay_Raylib_Initialize(1000, 600, "ffmpeg GUI", FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT); // Extra parameters to this function are new since the video was published
 
-    fontData = (FontData){
-        .fontSize = 16,
-        .fontSizeMin = 8,
-        .fontSizeMax = 32,
-        .charWidth = 8,
-        .charHeight = 16,
-        .charHeightOverFour = 4,
-    };
+    LayoutCreator_Initialize();
 
     Font fonts[FONT_ID_DUMMY_LAST];
     fonts[FONT_ID_BODY] = LoadFontEx("resources/fonts/consolas.ttf", fontData.fontSizeMax, NULL, 0);
@@ -109,7 +81,6 @@ int main(void)
     Clay_SetMeasureTextFunction(Raylib_MeasureText, fonts);
 
     Clay_SetDebugModeEnabled(true);
-    InitializeLayout(clayContext);
 
     while (!WindowShouldClose())
     {
