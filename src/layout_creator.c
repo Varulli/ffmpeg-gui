@@ -3,6 +3,7 @@
 #include "nfd.h"
 #include "cJSON.h"
 #include <stdio.h>
+#include <stddef.h>
 
 #ifdef _WIN32
 #include <windef.h>
@@ -12,6 +13,11 @@
 #include <namedpipeapi.h>
 #else
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/select.h>
+#include <sys/wait.h>
+#include <errno.h>
 #endif
 
 #define TEXTBOX_BUFFER_SIZE 256
@@ -100,6 +106,7 @@ typedef enum
     BUTTON_ID_BROWSE_SUBTITLES_SOURCE,
     BUTTON_ID_BROWSE_OUTPUT,
     BUTTON_ID_CONVERT,
+    BUTTON_ID_CONVERT_CANCEL,
     BUTTON_ID_DUMMY_LAST
 } ButtonID;
 
@@ -271,16 +278,24 @@ typedef struct
     DirectionID directionLock;
     Vector2 middleClickPosition;
 } ScrollData;
+
 typedef struct
 {
-    const char *name;
-    const char *extensions;
-} FormatData;
+#ifdef _WIN32
+    HANDLE process;
+    HANDLE stdoutRead;
+#else
+    pid_t pid;
+    int stdoutfd;
+#endif
+    bool valid;
+} ChildProcessData;
 
 typedef struct
 {
     char inputPath[TEXTBOX_BUFFER_SIZE];
     size_t streamCounts[STREAM_ID_DUMMY_LAST];
+    ChildProcessData convertProcess;
 } StreamData;
 
 typedef struct
@@ -290,6 +305,20 @@ typedef struct
     size_t imageSizeMin;
     size_t imageSizeMax;
 } ImageData;
+
+typedef struct
+{
+    char *buffer;
+    size_t len;
+    size_t cap;
+} StringBuilder;
+
+typedef struct
+{
+    char **v;
+    size_t len;
+    size_t cap;
+} ArgvBuilder;
 
 static FontData fontData;
 static TextboxData textboxData;
@@ -411,6 +440,377 @@ const char *GetFilePathWithoutExt(const char *filePath)
     return buffer;
 }
 
+void sbInit(StringBuilder *sb)
+{
+    sb->buffer = NULL;
+    sb->len = 0;
+    sb->cap = 0;
+}
+
+void sbReserve(StringBuilder *sb, size_t extra)
+{
+    if (sb->len + extra + 1 <= sb->cap)
+    {
+        return;
+    }
+
+    size_t new_cap = sb->cap ? sb->cap * 2 : 128;
+    while (new_cap < sb->len + extra + 1)
+    {
+        new_cap *= 2;
+    }
+
+    sb->buffer = realloc(sb->buffer, new_cap);
+    sb->cap = new_cap;
+}
+
+void sbAppend(StringBuilder *sb, const char *s)
+{
+    size_t n = strlen(s);
+    sbReserve(sb, n);
+    memcpy(sb->buffer + sb->len, s, n);
+    sb->len += n;
+    sb->buffer[sb->len] = '\0';
+}
+
+void sbAppendf(StringBuilder *sb, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+
+    sbReserve(sb, n);
+
+    va_start(ap, fmt);
+    vsnprintf(sb->buffer + sb->len, n + 1, fmt, ap);
+    va_end(ap);
+
+    sb->len += n;
+}
+
+void sbFree(StringBuilder *sb)
+{
+    free(sb->buffer);
+}
+
+void argvInit(ArgvBuilder *a)
+{
+    a->v = NULL;
+    a->len = 0;
+    a->cap = 0;
+}
+
+void argvPush(ArgvBuilder *a, char *arg)
+{
+    if (a->len + 1 >= a->cap)
+    {
+        a->cap = a->cap ? a->cap * 2 : 8;
+        a->v = realloc(a->v, a->cap * sizeof(char *));
+    }
+    a->v[a->len++] = arg;
+    a->v[a->len] = NULL;
+}
+
+char *argprintf(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+
+    char *buffer = malloc(n + 1);
+
+    va_start(ap, fmt);
+    vsnprintf(buffer, n + 1, fmt, ap);
+    va_end(ap);
+
+    return buffer;
+}
+
+void argvFree(ArgvBuilder *a)
+{
+    for (size_t i = 0; i < a->len; i++)
+    {
+        free(a->v[i]);
+    }
+    free(a->v);
+}
+
+static char *buildCmdline(char *argv[])
+{
+    size_t cap = 256;
+    size_t len = 0;
+    char *cmd = malloc(cap);
+
+    for (size_t i = 1; argv[i] != NULL; i++)
+    {
+        const char *arg = argv[i];
+
+        if (len + strlen(arg) + 2 >= cap)
+        {
+            cap *= 2;
+            cmd = realloc(cmd, cap);
+        }
+
+        if (i > 1)
+        {
+            cmd[len++] = ' ';
+        }
+
+        len += sprintf(cmd + len, "%s", arg);
+    }
+
+    cmd[len] = '\0';
+
+    return cmd;
+}
+
+int childCreate(ChildProcessData *c, char *argv[])
+{
+#ifdef _WIN32
+    SECURITY_ATTRIBUTES sa = {0};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+
+    HANDLE outRead, outWrite;
+    if (!CreatePipe(&outRead, &outWrite, &sa, 0))
+    {
+        ERROR("CreatePipe failed (%d).", GetLastError());
+        return GetLastError();
+    }
+
+    SetHandleInformation(outRead, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOA si = {0};
+    PROCESS_INFORMATION pi = {0};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = outWrite;
+    si.hStdError = outWrite;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+
+    char *cmdline = buildCmdline(argv);
+    LOG("cmd = \"%s\"", cmdline);
+
+    BOOL ok = CreateProcess(NULL, cmdline, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+
+    free(cmdline);
+    CloseHandle(outWrite);
+
+    if (!ok)
+    {
+        ERROR("CreateProcess failed (%d).", GetLastError());
+        CloseHandle(outRead);
+        return GetLastError();
+    }
+
+    CloseHandle(pi.hThread);
+
+    c->process = pi.hProcess;
+    c->stdoutRead = outRead;
+    c->valid = true;
+
+    return 0;
+#else
+    int pipefd[2];
+    if (pipe(pipefd) < 0)
+    {
+        return -1;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0)
+    {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return -1;
+    }
+
+    if (pid == 0)
+    {
+        /* child */
+        close(pipefd[0]);
+
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
+
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+
+    /* parent */
+    close(pipefd[1]);
+
+    /* make read end non-blocking */
+    int flags = fcntl(pipefd[0], F_GETFL, 0);
+    fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
+
+    c->pid = pid;
+    c->stdoutfd = pipefd[0];
+    c->valid = true;
+
+    return 0;
+#endif
+}
+
+void childReset(ChildProcessData *c)
+{
+    if (c == NULL)
+    {
+        return;
+    }
+#ifdef _WIN32
+    if (c->process != NULL)
+    {
+        CloseHandle(c->process);
+    }
+    if (c->stdoutRead != NULL)
+    {
+        CloseHandle(c->stdoutRead);
+    }
+#else
+    if (c->stdoutfd >= 0)
+    {
+        close(c->stdoutfd);
+    }
+#endif
+    memset(c, 0, sizeof(*c));
+}
+
+int childKill(ChildProcessData *c)
+{
+#ifdef _WIN32
+    if (c == NULL || c->process == NULL)
+    {
+        return -1;
+    }
+
+    /* Check if already exited */
+    DWORD r = WaitForSingleObject(c->process, 0);
+    if (r == WAIT_OBJECT_0)
+    {
+        return 0;
+    }
+
+    /* Force termination */
+    if (!TerminateProcess(c->process, 1))
+    {
+        return -1;
+    }
+
+    childReset(c);
+
+    return 0;
+#else
+    if (c == NULL || c->pid <= 0)
+    {
+        return -1;
+    }
+
+    /* SIGKILL cannot be ignored */
+    if (kill(c->pid, SIGKILL) < 0)
+    {
+        if (errno == ESRCH)
+        {
+            return 0; /* already dead */
+        }
+        return -1;
+    }
+
+    /* Reap to avoid zombie (non-blocking) */
+    waitpid(c->pid, NULL, WNOHANG);
+
+    childReset(c);
+
+    return 0;
+#endif
+}
+
+int childPoll(ChildProcessData *c)
+{
+#ifdef _WIN32
+    DWORD avail = 0;
+    if (!PeekNamedPipe(c->stdoutRead, NULL, 0, NULL, &avail, NULL))
+    {
+        if (GetLastError() == ERROR_BROKEN_PIPE)
+        {
+            return 0;
+        }
+        ERROR("PeekNamedPipe failed (%d).", GetLastError());
+        return GetLastError();
+    }
+    return avail > 0 ? 1 : 0;
+#else
+    fd_set rfds;
+    struct timeval tv = {0, 0};
+
+    FD_ZERO(&rfds);
+    FD_SET(c->stdoutfd, &rfds);
+
+    int r = select(c->stdoutfd + 1, &rfds, NULL, NULL, &tv);
+    if (r < 0)
+    {
+        return -1;
+    }
+
+    return FD_ISSET(c->stdoutfd, &rfds) ? 1 : 0;
+#endif
+}
+
+int childRead(ChildProcessData *c, char *buffer, size_t len)
+{
+#ifdef _WIN32
+    DWORD read = 0;
+    if (!ReadFile(c->stdoutRead, buffer, len, &read, NULL))
+    {
+        if (GetLastError() == ERROR_BROKEN_PIPE)
+        {
+            return 0; /* EOF */
+        }
+        ERROR("ReadFile failed (%d).", GetLastError());
+        return GetLastError();
+    }
+    return read;
+#else
+    ssize_t r = read(c->stdout_fd, buffer, len);
+    if (r < 0)
+    {
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+        {
+            return 0;
+        }
+        return -1;
+    }
+    return r;
+#endif
+}
+
+int childExited(ChildProcessData *c)
+{
+#ifdef _WIN32
+    DWORD r = WaitForSingleObject(c->process, 0);
+    if (r == WAIT_OBJECT_0)
+    {
+        return 1;
+    }
+    if (r == WAIT_TIMEOUT)
+    {
+        return 0;
+    }
+    return -1;
+#else
+    int status;
+    pid_t r = waitpid(c->pid, &status, WNOHANG);
+    if (r < 0)
+    {
+        return -1;
+    }
+    return r > 0 ? 1 : 0;
+#endif
+}
+
 int convert()
 {
     char buffer[4096];
@@ -471,7 +871,7 @@ int convert()
         break;
 
     default:
-        ERROR("Invalid output type selected (%c)", outputType);
+        ERROR("Invalid output type selected (%c).", outputType);
         return 5;
         break;
     }
@@ -512,18 +912,14 @@ int convert()
     bool outputAudio = (outputType == 'a' || (outputVideo && strcmp(outputExt, ".gif"))) && streamData.streamCounts[STREAM_ID_AUDIO] > 0;
     bool outputImage = outputType == 'i';
 
-#ifdef _WIN32
-    ret = snprintf(
-        buffer,
-        sizeof(buffer),
-        "ffmpeg -v error -progress pipe:1 -y -i \"%s\" -filter_complex \"",
-        streamData.inputPath);
+    StringBuilder sb;
+    sbInit(&sb);
+    sbAppend(&sb, "\"");
     if (outputVideo)
     {
         bool burnSubtitles = getDropdownValue(DROPDOWN_ID_SUBTITLES)[0] != '\0';
-        ret += snprintf(
-            buffer + ret,
-            sizeof(buffer) - ret,
+        sbAppendf(
+            &sb,
             "[0:v]fps=%s,trim=%s:%s,setpts=(PTS-STARTPTS)/%s,crop=%s:%s:%s:%s,scale=%s:%s%s%s%s%s[out_v];",
             getTextboxValue(TEXTBOX_ID_FPS),
             getTextboxValue(TEXTBOX_ID_DURATION_START_VIDEO),
@@ -543,9 +939,8 @@ int convert()
     if (outputAudio)
     {
         bool channelLayout = getDropdownValue(DROPDOWN_ID_CHANNEL_LAYOUT)[0] != '\0';
-        ret += snprintf(
-            buffer + ret,
-            sizeof(buffer) - ret,
+        sbAppendf(
+            &sb,
             "[0:a]atrim=%s:%s,",
             getTextboxValue(TEXTBOX_ID_DURATION_START_AUDIO),
             getTextboxValue(TEXTBOX_ID_DURATION_END_AUDIO)[0] == 'e' ? "" : getTextboxValue(TEXTBOX_ID_DURATION_END_AUDIO));
@@ -553,14 +948,13 @@ int convert()
         float multiplier = atof(getTextboxValue(TEXTBOX_ID_SPEED_AUDIO));
         while (multiplier < 0.5)
         {
-            ret += snprintf(buffer + ret, sizeof(buffer) - ret, "atempo=0.5,");
+            sbAppend(&sb, "atempo=0.5,");
             multiplier *= 2;
         }
-        ret += snprintf(buffer + ret, sizeof(buffer) - ret, "atempo=%f,", multiplier);
+        sbAppendf(&sb, "atempo=%f,", multiplier);
 
-        ret += snprintf(
-            buffer + ret,
-            sizeof(buffer) - ret,
+        sbAppendf(
+            &sb,
             "adelay=%s:1%s,aformat=%s%s[out_a]",
             getTextboxValue(TEXTBOX_ID_DELAY),
             getDropdownValue(DROPDOWN_ID_LOUDNORM_ENABLE)[0] == '\0' ? "" : ",loudnorm",
@@ -569,9 +963,8 @@ int convert()
     }
     if (outputImage)
     {
-        ret += snprintf(
-            buffer + ret,
-            sizeof(buffer) - ret,
+        sbAppendf(
+            &sb,
             "[0:v]crop=%s:%s:%s:%s,scale=%s:%s[out_v]",
             getTextboxValue(TEXTBOX_ID_CROP_W),
             getTextboxValue(TEXTBOX_ID_CROP_H),
@@ -580,37 +973,187 @@ int convert()
             getTextboxValue(TEXTBOX_ID_SCALE_W),
             getTextboxValue(TEXTBOX_ID_SCALE_H));
     }
-    ret += snprintf(
-        buffer + ret,
-        sizeof(buffer) - ret,
-        "\" %s %s %s %s \"%s%c%s%s\"",
-        outputVideo || outputImage ? "-map \"[out_v]\"" : "",
-        outputVideo && gifInput ? "-c:v libx264 -movflags +faststart" : "",
-        outputAudio ? "-map \"[out_a]\"" : "",
-        outputImage ? "-vframes 1" : "",
-        outputDir, slash, outputName, outputExt);
+    sbAppend(&sb, "\"");
+    // sbAppendf(
+    //     &sb,
+    //     "\" %s %s %s %s \"%s%c%s%s\"",
+    //     outputVideo || outputImage ? "-map \"[out_v]\"" : "",
+    //     outputVideo && gifInput ? "-c:v libx264 -movflags +faststart" : "",
+    //     outputAudio ? "-map \"[out_a]\"" : "",
+    //     outputImage ? "-vframes 1" : "",
+    //     outputDir, slash, outputName, outputExt);
 
-    if (ret < 0 || ret >= sizeof(buffer))
+    ArgvBuilder a;
+    argvInit(&a);
+    argvPush(&a, strdup("ffmpeg"));
+    argvPush(&a, strdup("ffmpeg"));
+    argvPush(&a, strdup("-v"));
+    argvPush(&a, strdup("error"));
+    argvPush(&a, strdup("-progress"));
+    argvPush(&a, strdup("pipe:1"));
+    argvPush(&a, strdup("-y"));
+    argvPush(&a, strdup("-i"));
+    argvPush(&a, argprintf("\"%s\"", streamData.inputPath));
+    argvPush(&a, strdup("-filter_complex"));
+    argvPush(&a, sb.buffer);
+    if (outputVideo || outputImage)
     {
-        ERROR("Failed to write command into buffer.");
-        return 9;
+        argvPush(&a, strdup("-map"));
+        argvPush(&a, strdup("\"[out_v]\""));
+    }
+    if (outputVideo && gifInput)
+    {
+        argvPush(&a, strdup("-c:v"));
+        argvPush(&a, strdup("libx264"));
+        argvPush(&a, strdup("-movflags"));
+        argvPush(&a, strdup("+faststart"));
+    }
+    if (outputAudio)
+    {
+        argvPush(&a, strdup("-map"));
+        argvPush(&a, strdup("\"[out_a]\""));
+    }
+    if (outputImage)
+    {
+        argvPush(&a, strdup("-vframes"));
+        argvPush(&a, strdup("1"));
+    }
+    argvPush(&a, argprintf("\"%s%c%s%s\"", outputDir, slash, outputName, outputExt));
+
+    ret = childCreate(&streamData.convertProcess, a.v);
+    argvFree(&a);
+    if (ret)
+    {
+        ERROR("Failed to create child process (%d)", ret);
+        return ret;
     }
 
-    LOG("cmd = \"%s\"", buffer);
+    /*
+    #ifdef _WIN32
+        ret = snprintf(
+            buffer,
+            sizeof(buffer),
+            "ffmpeg -v error -progress pipe:1 -y -i \"%s\" -filter_complex \"",
+            streamData.inputPath);
+        if (outputVideo)
+        {
+            bool burnSubtitles = getDropdownValue(DROPDOWN_ID_SUBTITLES)[0] != '\0';
+            ret += snprintf(
+                buffer + ret,
+                sizeof(buffer) - ret,
+                "[0:v]fps=%s,trim=%s:%s,setpts=(PTS-STARTPTS)/%s,crop=%s:%s:%s:%s,scale=%s:%s%s%s%s%s[out_v];",
+                getTextboxValue(TEXTBOX_ID_FPS),
+                getTextboxValue(TEXTBOX_ID_DURATION_START_VIDEO),
+                getTextboxValue(TEXTBOX_ID_DURATION_END_VIDEO)[0] == 'e' ? "" : getTextboxValue(TEXTBOX_ID_DURATION_END_VIDEO),
+                getTextboxValue(TEXTBOX_ID_SPEED_VIDEO),
+                getTextboxValue(TEXTBOX_ID_CROP_W),
+                getTextboxValue(TEXTBOX_ID_CROP_H),
+                getTextboxValue(TEXTBOX_ID_CROP_X),
+                getTextboxValue(TEXTBOX_ID_CROP_Y),
+                getTextboxValue(TEXTBOX_ID_SCALE_W),
+                getTextboxValue(TEXTBOX_ID_SCALE_H),
+                !burnSubtitles ? "" : ",subtitles='",
+                !burnSubtitles ? "" : trim(getTextboxValue(TEXTBOX_ID_SUBTITLES_SOURCE)),
+                !burnSubtitles ? "" : "'",
+                !gifInput ? "" : ",format=yuv420p");
+        }
+        if (outputAudio)
+        {
+            bool channelLayout = getDropdownValue(DROPDOWN_ID_CHANNEL_LAYOUT)[0] != '\0';
+            ret += snprintf(
+                buffer + ret,
+                sizeof(buffer) - ret,
+                "[0:a]atrim=%s:%s,",
+                getTextboxValue(TEXTBOX_ID_DURATION_START_AUDIO),
+                getTextboxValue(TEXTBOX_ID_DURATION_END_AUDIO)[0] == 'e' ? "" : getTextboxValue(TEXTBOX_ID_DURATION_END_AUDIO));
 
-    STARTUPINFO si = {0};
-    PROCESS_INFORMATION pi = {0};
-    si.cb = sizeof(si);
+            float multiplier = atof(getTextboxValue(TEXTBOX_ID_SPEED_AUDIO));
+            while (multiplier < 0.5)
+            {
+                ret += snprintf(buffer + ret, sizeof(buffer) - ret, "atempo=0.5,");
+                multiplier *= 2;
+            }
+            ret += snprintf(buffer + ret, sizeof(buffer) - ret, "atempo=%f,", multiplier);
 
-    if (!CreateProcess(NULL, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
-    {
-        ERROR("CreateProcess failed (%d)", GetLastError());
-        return GetLastError();
-    }
-#else
+            ret += snprintf(
+                buffer + ret,
+                sizeof(buffer) - ret,
+                "adelay=%s:1%s,aformat=%s%s[out_a]",
+                getTextboxValue(TEXTBOX_ID_DELAY),
+                getDropdownValue(DROPDOWN_ID_LOUDNORM_ENABLE)[0] == '\0' ? "" : ",loudnorm",
+                !channelLayout ? "" : "channel_layouts=",
+                !channelLayout ? "" : getDropdownValue(DROPDOWN_ID_CHANNEL_LAYOUT));
+        }
+        if (outputImage)
+        {
+            ret += snprintf(
+                buffer + ret,
+                sizeof(buffer) - ret,
+                "[0:v]crop=%s:%s:%s:%s,scale=%s:%s[out_v]",
+                getTextboxValue(TEXTBOX_ID_CROP_W),
+                getTextboxValue(TEXTBOX_ID_CROP_H),
+                getTextboxValue(TEXTBOX_ID_CROP_X),
+                getTextboxValue(TEXTBOX_ID_CROP_Y),
+                getTextboxValue(TEXTBOX_ID_SCALE_W),
+                getTextboxValue(TEXTBOX_ID_SCALE_H));
+        }
+        ret += snprintf(
+            buffer + ret,
+            sizeof(buffer) - ret,
+            "\" %s %s %s %s \"%s%c%s%s\"",
+            outputVideo || outputImage ? "-map \"[out_v]\"" : "",
+            outputVideo && gifInput ? "-c:v libx264 -movflags +faststart" : "",
+            outputAudio ? "-map \"[out_a]\"" : "",
+            outputImage ? "-vframes 1" : "",
+            outputDir, slash, outputName, outputExt);
 
-#endif
+        if (ret < 0 || ret >= sizeof(buffer))
+        {
+            ERROR("Failed to write command into buffer.");
+            return 9;
+        }
 
+        LOG("cmd = \"%s\"", buffer);
+
+        // Create read/write pipes
+        HANDLE hStdOutRead, hStdOutWrite;
+
+        SECURITY_ATTRIBUTES sa;
+        sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+        sa.bInheritHandle = TRUE;
+        sa.lpSecurityDescriptor = NULL;
+
+        CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 0);
+
+        // Create child process
+        STARTUPINFO si;
+        ZeroMemory(&si, sizeof(si));
+        si.cb = sizeof(si);
+        si.dwFlags |= STARTF_USESTDHANDLES;
+        si.hStdOutput = hStdOutWrite;
+
+        SetHandleInformation(hStdOutRead, HANDLE_FLAG_INHERIT, 0);
+
+        PROCESS_INFORMATION pi = {0};
+
+        if (!CreateProcess(NULL, buffer, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi))
+        {
+            ERROR("CreateProcess failed (%d)", GetLastError());
+            CloseHandle(hStdOutRead);
+            CloseHandle(hStdOutWrite);
+            return GetLastError();
+        }
+
+        // Close write handles in parent
+        CloseHandle(hStdOutWrite);
+
+        streamData.convertProcess.process = pi.hProcess;
+        streamData.convertProcess.stdoutRead = hStdOutRead;
+        streamData.convertProcess.valid = true;
+    #else
+
+    #endif
+    */
     return 0;
 }
 
@@ -850,7 +1393,16 @@ void HandleLoadPreviewButtonInteraction(
         si.hStdError = hStdErrWrite;
 
         PROCESS_INFORMATION pi = {0};
-        CreateProcess(NULL, buffer, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+
+        if (!CreateProcess(NULL, buffer, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi))
+        {
+            ERROR("CreateProcess failed (%d)", GetLastError());
+            CloseHandle(hStdOutRead);
+            CloseHandle(hStdErrRead);
+            CloseHandle(hStdOutWrite);
+            CloseHandle(hStdErrWrite);
+            return;
+        }
 
         // Close write handles in parent
         CloseHandle(hStdOutWrite);
@@ -1067,11 +1619,25 @@ void HandleConvertButtonInteraction(
 {
     if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
-        int result = convert();
-
-        if (result)
+        int ret = convert();
+        if (ret)
         {
-            ERROR("Convert failed (%d)", result);
+            ERROR("Convert failed (%d)", ret);
+        }
+    }
+}
+
+void HandleConvertCancelButtonInteraction(
+    Clay_ElementId elementId,
+    Clay_PointerData pointerData,
+    intptr_t userData)
+{
+    if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
+    {
+        int ret = childKill(&streamData.convertProcess);
+        if (ret)
+        {
+            ERROR("Convert cancel failed");
         }
     }
 }
@@ -2343,6 +2909,15 @@ void LayoutCreator_Initialize()
     streamData = (StreamData){
         .inputPath = {0},
         .streamCounts = {0},
+        .convertProcess = {
+#ifdef _WIN32
+            .process = NULL,
+            .stdoutRead = NULL,
+#else
+            .pid = 0,
+            .stdoutfd = 0,
+#endif
+        },
     };
 
     previewImageData = (ImageData){
@@ -2362,6 +2937,8 @@ void LayoutCreator_Initialize()
 
 void LayoutCreator_Destroy()
 {
+    childKill(&streamData.convertProcess);
+
     NFD_Quit();
 }
 
@@ -2379,6 +2956,24 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
     {
         scrollingWindowVertical = scrollData.data[SCROLL_ID_WINDOW].scrollContainerDimensions.height < scrollData.data[SCROLL_ID_WINDOW].contentDimensions.height;
         scrollingWindowHorizontal = scrollData.data[SCROLL_ID_WINDOW].scrollContainerDimensions.width < scrollData.data[SCROLL_ID_WINDOW].contentDimensions.width;
+    }
+
+    if (streamData.convertProcess.valid)
+    {
+        if (childPoll(&streamData.convertProcess))
+        {
+            char buffer[4096];
+            int n = childRead(&streamData.convertProcess, buffer, sizeof(buffer));
+            if (n > 0)
+            {
+                LOG("%s", buffer);
+            }
+        }
+
+        if (childExited(&streamData.convertProcess))
+        {
+            childReset(&streamData.convertProcess);
+        }
     }
 
     CLAY({
@@ -2642,13 +3237,26 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                         defaultBoxPadding);
                 }
 
-                RenderButton(
-                    CLAY_STRING("Convert"),
-                    BUTTON_ID_CONVERT,
-                    !hasInput || trim(getTextboxValue(TEXTBOX_ID_OUTPUT_PATH))[0] == '\0',
-                    HandleConvertButtonInteraction,
-                    0,
-                    buttonPadding);
+                if (streamData.convertProcess.valid)
+                {
+                    RenderButton(
+                        CLAY_STRING("Cancel"),
+                        BUTTON_ID_CONVERT_CANCEL,
+                        false,
+                        HandleConvertCancelButtonInteraction,
+                        0,
+                        buttonPadding);
+                }
+                else
+                {
+                    RenderButton(
+                        CLAY_STRING("Convert"),
+                        BUTTON_ID_CONVERT,
+                        !hasInput || trim(getTextboxValue(TEXTBOX_ID_OUTPUT_PATH))[0] == '\0',
+                        HandleConvertButtonInteraction,
+                        0,
+                        buttonPadding);
+                }
             }
         }
     }
