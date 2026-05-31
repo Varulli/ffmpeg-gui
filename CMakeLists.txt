@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.0)
+cmake_minimum_required(VERSION 3.0)
 
 project(ffmpeg-gui VERSION 1.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 99)
@@ -20,7 +20,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 FetchContent_Declare(raylib
                      GIT_REPOSITORY "https://github.com/raysan5/raylib.git"
-                     GIT_TAG "5.5"
+                     GIT_TAG "6.0"
                      GIT_PROGRESS TRUE
                      GIT_SHALLOW TRUE
                      )

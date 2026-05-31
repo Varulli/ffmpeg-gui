@@ -18,6 +18,7 @@
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <signal.h>
 #endif
 
 #define TEXTBOX_BUFFER_SIZE 256
@@ -537,32 +538,45 @@ void argvFree(ArgvBuilder *a)
     free(a->v);
 }
 
-static char *buildCmdline(char *argv[])
+static char *buildCmdline(char *const argv[])
 {
     size_t cap = 256;
     size_t len = 0;
     char *cmd = malloc(cap);
 
-    for (size_t i = 1; argv[i] != NULL; i++)
+    for (size_t i = 0; argv[i] != NULL; i++)
     {
         const char *arg = argv[i];
+        int need_quotes = strpbrk(arg, " \t\"") != NULL;
 
-        if (len + strlen(arg) + 2 >= cap)
+        if (len + strlen(arg) + 4 >= cap)
         {
             cap *= 2;
             cmd = realloc(cmd, cap);
         }
 
-        if (i > 1)
+        if (i > 0)
         {
             cmd[len++] = ' ';
         }
-
-        len += sprintf(cmd + len, "%s", arg);
+        if (!need_quotes)
+        {
+            len += sprintf(cmd + len, "%s", arg);
+        }
+        else
+        {
+            cmd[len++] = '"';
+            for (const char *p = arg; *p; p++)
+            {
+                if (*p == '"')
+                    cmd[len++] = '\\';
+                cmd[len++] = *p;
+            }
+            cmd[len++] = '"';
+        }
     }
 
     cmd[len] = '\0';
-
     return cmd;
 }
 
@@ -749,6 +763,8 @@ int childPoll(ChildProcessData *c)
     FD_ZERO(&rfds);
     FD_SET(c->stdoutfd, &rfds);
 
+    // LOG("%d", c->stdoutfd);
+    // int r = select(c->stdoutfd + 1, &rfds, NULL, NULL, NULL);
     int r = select(c->stdoutfd + 1, &rfds, NULL, NULL, &tv);
     if (r < 0)
     {
@@ -774,7 +790,7 @@ int childRead(ChildProcessData *c, char *buffer, size_t len)
     }
     return read;
 #else
-    ssize_t r = read(c->stdout_fd, buffer, len);
+    ssize_t r = read(c->stdoutfd, buffer, len);
     if (r < 0)
     {
         if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -785,6 +801,117 @@ int childRead(ChildProcessData *c, char *buffer, size_t len)
     }
     return r;
 #endif
+}
+
+char *childReadAll(ChildProcessData *c, size_t *outSize)
+{
+    if (!c || !outSize)
+    {
+        ERROR("childReadAll(): NULL c or outSize");
+        return NULL;
+    }
+
+    size_t cap = 4096;
+    size_t len = 0;
+
+    char *out = malloc(cap + 1);
+    if (!out)
+    {
+        ERROR("childReadAll(): failed init malloc");
+        return NULL;
+    }
+
+#ifndef _WIN32
+    int flags = fcntl(c->stdoutfd, F_GETFL, 0);
+    if (flags < 0)
+    {
+        free(out);
+        return NULL;
+    }
+
+    if (fcntl(c->stdoutfd, F_SETFL, flags & ~O_NONBLOCK) < 0)
+    {
+        free(out);
+        return NULL;
+    }
+#endif
+
+    for (;;)
+    {
+        char buf[4096];
+
+#ifdef _WIN32
+        DWORD nread = 0;
+
+        BOOL ok = ReadFile(
+            c->stdout_read,
+            buf,
+            sizeof(buf),
+            &nread,
+            NULL);
+
+        if (!ok)
+        {
+            DWORD err = GetLastError();
+
+            if (err == ERROR_BROKEN_PIPE)
+                break; /* EOF */
+
+            free(out);
+            return NULL;
+        }
+
+        if (nread == 0)
+            break;
+
+        size_t n = (size_t)nread;
+
+#else
+        ssize_t nread = read(c->stdoutfd, buf, sizeof(buf));
+
+        if (nread < 0)
+        {
+            if (errno == EINTR)
+                continue;
+
+            free(out);
+            ERROR("childReadAll(): read() error");
+            perror("ffmpeg");
+            return NULL;
+        }
+
+        if (nread == 0)
+            break; /* EOF */
+
+        size_t n = (size_t)nread;
+
+#endif
+
+        /* grow output buffer if needed */
+        if (len + n + 1 > cap)
+        {
+            while (len + n + 1 > cap)
+                cap *= 2;
+
+            char *tmp = realloc(out, cap + 1);
+            if (!tmp)
+            {
+                free(out);
+                ERROR("childReadAll(): failed out resize");
+                return NULL;
+            }
+
+            out = tmp;
+        }
+
+        memcpy(out + len, buf, n);
+        len += n;
+    }
+
+    out[len] = '\0';
+    *outSize = len;
+
+    return out;
 }
 
 int childExited(ChildProcessData *c)
@@ -885,6 +1012,8 @@ int convert()
     }
 #endif
 
+    LOG("dir: %s\nname: %s\next: %s", outputDir, outputName, outputExt);
+
     size_t fullOutputPathSize = strlen(outputDir) + strlen(outputName) + strlen(outputExt) + 2;
     char *fullOutputPath = malloc(fullOutputPathSize);
     if (fullOutputPath == NULL)
@@ -914,7 +1043,6 @@ int convert()
 
     StringBuilder sb;
     sbInit(&sb);
-    sbAppend(&sb, "\"");
     if (outputVideo)
     {
         bool burnSubtitles = getDropdownValue(DROPDOWN_ID_SUBTITLES)[0] != '\0';
@@ -973,19 +1101,9 @@ int convert()
             getTextboxValue(TEXTBOX_ID_SCALE_W),
             getTextboxValue(TEXTBOX_ID_SCALE_H));
     }
-    sbAppend(&sb, "\"");
-    // sbAppendf(
-    //     &sb,
-    //     "\" %s %s %s %s \"%s%c%s%s\"",
-    //     outputVideo || outputImage ? "-map \"[out_v]\"" : "",
-    //     outputVideo && gifInput ? "-c:v libx264 -movflags +faststart" : "",
-    //     outputAudio ? "-map \"[out_a]\"" : "",
-    //     outputImage ? "-vframes 1" : "",
-    //     outputDir, slash, outputName, outputExt);
 
     ArgvBuilder a;
     argvInit(&a);
-    argvPush(&a, strdup("ffmpeg"));
     argvPush(&a, strdup("ffmpeg"));
     argvPush(&a, strdup("-v"));
     argvPush(&a, strdup("error"));
@@ -993,13 +1111,13 @@ int convert()
     argvPush(&a, strdup("pipe:1"));
     argvPush(&a, strdup("-y"));
     argvPush(&a, strdup("-i"));
-    argvPush(&a, argprintf("\"%s\"", streamData.inputPath));
+    argvPush(&a, strdup(streamData.inputPath));
     argvPush(&a, strdup("-filter_complex"));
     argvPush(&a, sb.buffer);
     if (outputVideo || outputImage)
     {
         argvPush(&a, strdup("-map"));
-        argvPush(&a, strdup("\"[out_v]\""));
+        argvPush(&a, strdup("[out_v]"));
     }
     if (outputVideo && gifInput)
     {
@@ -1011,14 +1129,14 @@ int convert()
     if (outputAudio)
     {
         argvPush(&a, strdup("-map"));
-        argvPush(&a, strdup("\"[out_a]\""));
+        argvPush(&a, strdup("[out_a]"));
     }
     if (outputImage)
     {
         argvPush(&a, strdup("-vframes"));
         argvPush(&a, strdup("1"));
     }
-    argvPush(&a, argprintf("\"%s%c%s%s\"", outputDir, slash, outputName, outputExt));
+    argvPush(&a, argprintf("%s%c%s%s", outputDir, slash, outputName, outputExt));
 
     ret = childCreate(&streamData.convertProcess, a.v);
     argvFree(&a);
@@ -1028,132 +1146,6 @@ int convert()
         return ret;
     }
 
-    /*
-    #ifdef _WIN32
-        ret = snprintf(
-            buffer,
-            sizeof(buffer),
-            "ffmpeg -v error -progress pipe:1 -y -i \"%s\" -filter_complex \"",
-            streamData.inputPath);
-        if (outputVideo)
-        {
-            bool burnSubtitles = getDropdownValue(DROPDOWN_ID_SUBTITLES)[0] != '\0';
-            ret += snprintf(
-                buffer + ret,
-                sizeof(buffer) - ret,
-                "[0:v]fps=%s,trim=%s:%s,setpts=(PTS-STARTPTS)/%s,crop=%s:%s:%s:%s,scale=%s:%s%s%s%s%s[out_v];",
-                getTextboxValue(TEXTBOX_ID_FPS),
-                getTextboxValue(TEXTBOX_ID_DURATION_START_VIDEO),
-                getTextboxValue(TEXTBOX_ID_DURATION_END_VIDEO)[0] == 'e' ? "" : getTextboxValue(TEXTBOX_ID_DURATION_END_VIDEO),
-                getTextboxValue(TEXTBOX_ID_SPEED_VIDEO),
-                getTextboxValue(TEXTBOX_ID_CROP_W),
-                getTextboxValue(TEXTBOX_ID_CROP_H),
-                getTextboxValue(TEXTBOX_ID_CROP_X),
-                getTextboxValue(TEXTBOX_ID_CROP_Y),
-                getTextboxValue(TEXTBOX_ID_SCALE_W),
-                getTextboxValue(TEXTBOX_ID_SCALE_H),
-                !burnSubtitles ? "" : ",subtitles='",
-                !burnSubtitles ? "" : trim(getTextboxValue(TEXTBOX_ID_SUBTITLES_SOURCE)),
-                !burnSubtitles ? "" : "'",
-                !gifInput ? "" : ",format=yuv420p");
-        }
-        if (outputAudio)
-        {
-            bool channelLayout = getDropdownValue(DROPDOWN_ID_CHANNEL_LAYOUT)[0] != '\0';
-            ret += snprintf(
-                buffer + ret,
-                sizeof(buffer) - ret,
-                "[0:a]atrim=%s:%s,",
-                getTextboxValue(TEXTBOX_ID_DURATION_START_AUDIO),
-                getTextboxValue(TEXTBOX_ID_DURATION_END_AUDIO)[0] == 'e' ? "" : getTextboxValue(TEXTBOX_ID_DURATION_END_AUDIO));
-
-            float multiplier = atof(getTextboxValue(TEXTBOX_ID_SPEED_AUDIO));
-            while (multiplier < 0.5)
-            {
-                ret += snprintf(buffer + ret, sizeof(buffer) - ret, "atempo=0.5,");
-                multiplier *= 2;
-            }
-            ret += snprintf(buffer + ret, sizeof(buffer) - ret, "atempo=%f,", multiplier);
-
-            ret += snprintf(
-                buffer + ret,
-                sizeof(buffer) - ret,
-                "adelay=%s:1%s,aformat=%s%s[out_a]",
-                getTextboxValue(TEXTBOX_ID_DELAY),
-                getDropdownValue(DROPDOWN_ID_LOUDNORM_ENABLE)[0] == '\0' ? "" : ",loudnorm",
-                !channelLayout ? "" : "channel_layouts=",
-                !channelLayout ? "" : getDropdownValue(DROPDOWN_ID_CHANNEL_LAYOUT));
-        }
-        if (outputImage)
-        {
-            ret += snprintf(
-                buffer + ret,
-                sizeof(buffer) - ret,
-                "[0:v]crop=%s:%s:%s:%s,scale=%s:%s[out_v]",
-                getTextboxValue(TEXTBOX_ID_CROP_W),
-                getTextboxValue(TEXTBOX_ID_CROP_H),
-                getTextboxValue(TEXTBOX_ID_CROP_X),
-                getTextboxValue(TEXTBOX_ID_CROP_Y),
-                getTextboxValue(TEXTBOX_ID_SCALE_W),
-                getTextboxValue(TEXTBOX_ID_SCALE_H));
-        }
-        ret += snprintf(
-            buffer + ret,
-            sizeof(buffer) - ret,
-            "\" %s %s %s %s \"%s%c%s%s\"",
-            outputVideo || outputImage ? "-map \"[out_v]\"" : "",
-            outputVideo && gifInput ? "-c:v libx264 -movflags +faststart" : "",
-            outputAudio ? "-map \"[out_a]\"" : "",
-            outputImage ? "-vframes 1" : "",
-            outputDir, slash, outputName, outputExt);
-
-        if (ret < 0 || ret >= sizeof(buffer))
-        {
-            ERROR("Failed to write command into buffer.");
-            return 9;
-        }
-
-        LOG("cmd = \"%s\"", buffer);
-
-        // Create read/write pipes
-        HANDLE hStdOutRead, hStdOutWrite;
-
-        SECURITY_ATTRIBUTES sa;
-        sa.nLength = sizeof(SECURITY_ATTRIBUTES);
-        sa.bInheritHandle = TRUE;
-        sa.lpSecurityDescriptor = NULL;
-
-        CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 0);
-
-        // Create child process
-        STARTUPINFO si;
-        ZeroMemory(&si, sizeof(si));
-        si.cb = sizeof(si);
-        si.dwFlags |= STARTF_USESTDHANDLES;
-        si.hStdOutput = hStdOutWrite;
-
-        SetHandleInformation(hStdOutRead, HANDLE_FLAG_INHERIT, 0);
-
-        PROCESS_INFORMATION pi = {0};
-
-        if (!CreateProcess(NULL, buffer, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi))
-        {
-            ERROR("CreateProcess failed (%d)", GetLastError());
-            CloseHandle(hStdOutRead);
-            CloseHandle(hStdOutWrite);
-            return GetLastError();
-        }
-
-        // Close write handles in parent
-        CloseHandle(hStdOutWrite);
-
-        streamData.convertProcess.process = pi.hProcess;
-        streamData.convertProcess.stdoutRead = hStdOutRead;
-        streamData.convertProcess.valid = true;
-    #else
-
-    #endif
-    */
     return 0;
 }
 
@@ -1201,12 +1193,22 @@ void HandleLoadInputButtonInteraction(
         }
 
         ret = fread(buffer, 1, sizeof(buffer), fp);
-        pclose(fp);
-        if (ret < sizeof(buffer) && ferror(fp))
+        if (ferror(fp))
         {
-            ERROR("Failed to read command output.");
-            return;
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                clearerr(fp);
+            }
+            else
+            {
+                ERROR("Failed to read command output (%d).", ret);
+                // LOG("%s", buffer);
+                perror("ffmpeg-gui");
+                pclose(fp);
+                return;
+            }
         }
+        pclose(fp);
 
         cJSON *json = cJSON_ParseWithLength(buffer, ret);
         if (json == NULL)
@@ -1260,7 +1262,7 @@ void HandleLoadInputButtonInteraction(
             }
             else
             {
-                ERROR("Failed to read streams[%d]", i);
+                ERROR("Failed to read streams[%zu]", i);
             }
 
             i++;
@@ -1280,6 +1282,8 @@ void HandleLoadPreviewButtonInteraction(
 {
     if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
+        int logCounter = 0;
+
         char buffer[4096];
 
         int ret = snprintf(
@@ -1293,6 +1297,7 @@ void HandleLoadPreviewButtonInteraction(
             ERROR("Failed to write command into buffer.");
             return;
         }
+        // LOG("%s", buffer);
 
         FILE *fp = popen(buffer, "r");
         if (fp == NULL)
@@ -1349,133 +1354,63 @@ void HandleLoadPreviewButtonInteraction(
             scaleHeight = cropHeight;
         }
 
-        ret = snprintf(
-            buffer,
-            sizeof(buffer),
-            "ffmpeg -v error -i \"%s\" -vf \"crop=%d:%d:%d:%d,scale=%d:%d\" -vframes 1 -f rawvideo -pix_fmt rgba -",
-            streamData.inputPath,
-            cropWidth,
-            cropHeight,
-            cropOffsetX,
-            cropOffsetY,
-            scaleWidth,
-            scaleHeight);
+        ArgvBuilder a;
+        argvInit(&a);
+        argvPush(&a, strdup("ffmpeg"));
+        argvPush(&a, strdup("-v"));
+        argvPush(&a, strdup("error"));
+        argvPush(&a, strdup("-i"));
+        argvPush(&a, strdup(streamData.inputPath));
+        argvPush(&a, strdup("-vf"));
+        argvPush(&a, argprintf("crop=%d:%d:%d:%d,scale=%d:%d", cropWidth, cropHeight, cropOffsetX, cropOffsetY, scaleWidth, scaleHeight));
+        argvPush(&a, strdup("-vframes"));
+        argvPush(&a, strdup("1"));
+        argvPush(&a, strdup("-f"));
+        argvPush(&a, strdup("rawvideo"));
+        argvPush(&a, strdup("-pix_fmt"));
+        argvPush(&a, strdup("rgba"));
+        argvPush(&a, strdup("-"));
 
-        if (ret < 0 || ret >= sizeof(buffer))
+        char *cmd = buildCmdline(a.v);
+        // LOG("%s %s", a.v[0], cmd);
+        free(cmd);
+
+        // LOG("1");
+        ChildProcessData imageProcess = {0};
+        ret = childCreate(&imageProcess, a.v);
+        // LOG("2");
+        argvFree(&a);
+        if (ret)
         {
-            ERROR("Failed to write command into buffer.");
+            ERROR("Failed to create child process (%d)", ret);
             return;
         }
 
+        // LOG("3");
         size_t imageBufferSize = scaleWidth * scaleHeight * 4;
-        unsigned char *imageBuffer = calloc(imageBufferSize, sizeof(unsigned char));
+        // unsigned char *imageBuffer = calloc(imageBufferSize, sizeof(unsigned char));
         size_t totalBytesRead = 0;
 
-#ifdef _WIN32
-        // Create read/write pipes
-        HANDLE hStdOutRead, hStdOutWrite;
-        HANDLE hStdErrRead, hStdErrWrite;
+        // LOG("4");
+        unsigned char *imageBuffer = childReadAll(&imageProcess, &totalBytesRead);
 
-        SECURITY_ATTRIBUTES sa;
-        sa.nLength = sizeof(SECURITY_ATTRIBUTES);
-        sa.bInheritHandle = TRUE;
-        sa.lpSecurityDescriptor = NULL;
-
-        CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 0);
-        CreatePipe(&hStdErrRead, &hStdErrWrite, &sa, 0);
-
-        // Create child process
-        STARTUPINFO si;
-        ZeroMemory(&si, sizeof(si));
-        si.cb = sizeof(si);
-        si.dwFlags |= STARTF_USESTDHANDLES;
-        si.hStdOutput = hStdOutWrite;
-        si.hStdError = hStdErrWrite;
-
-        PROCESS_INFORMATION pi = {0};
-
-        if (!CreateProcess(NULL, buffer, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi))
+        if (imageBuffer == NULL)
         {
-            ERROR("CreateProcess failed (%d)", GetLastError());
-            CloseHandle(hStdOutRead);
-            CloseHandle(hStdErrRead);
-            CloseHandle(hStdOutWrite);
-            CloseHandle(hStdErrWrite);
+            ERROR("NULL imageBuffer");
             return;
         }
-
-        // Close write handles in parent
-        CloseHandle(hStdOutWrite);
-        CloseHandle(hStdErrWrite);
-
-        // Read from stdout
-        DWORD nBytesRead;
-        do
-        {
-            ReadFile(hStdOutRead, imageBuffer + totalBytesRead, imageBufferSize - totalBytesRead, &nBytesRead, NULL);
-            totalBytesRead += nBytesRead;
-        } while (nBytesRead > 0);
-
-        unsigned char errBuffer[1024] = {0};
-        DWORD nErrBytesRead;
-        ReadFile(hStdErrRead, errBuffer, sizeof(errBuffer), &nErrBytesRead, NULL);
-        if (nErrBytesRead > 0)
-        {
-            ERROR("%s", errBuffer);
-            free(imageBuffer);
-            CloseHandle(pi.hProcess);
-            CloseHandle(pi.hThread);
-            CloseHandle(hStdOutRead);
-            CloseHandle(hStdErrRead);
-            return;
-        }
-
-        size_t overflow = 0;
-        do
-        {
-            ReadFile(hStdOutRead, errBuffer + overflow, sizeof(errBuffer) - overflow, &nErrBytesRead, NULL);
-        } while (nErrBytesRead > 0);
-        if (overflow > 0)
-        {
-            ERROR("Received more bytes than expected (>=%zu).", overflow);
-            free(imageBuffer);
-            CloseHandle(pi.hProcess);
-            CloseHandle(pi.hThread);
-            CloseHandle(hStdOutRead);
-            CloseHandle(hStdErrRead);
-            return;
-        }
-
-        // Wait for child process to exit and close handles
-        WaitForSingleObject(pi.hProcess, INFINITE);
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-        CloseHandle(hStdOutRead);
-        CloseHandle(hStdErrRead);
-#else
-        // fp = popen(buffer, "r");
-        // if (fp == NULL)
-        // {
-        //     ERROR("Failed to execute command and establish pipe.");
-        //     return;
-        // }
-
-        // ret = 0
-        // ret = fread(imageBuffer + ret, 1, imageBufferSize - ret, fp);
-        // pclose(fp);
-        // if (ret < imageBufferSize && ferror(fp))
-        // {
-        //     ERROR("Failed to read command output.");
-        //     return;
-        // }
-#endif
-
         if (totalBytesRead != imageBufferSize)
         {
             ERROR("Total bytes read (%zu) less than image buffer size (%zu)", totalBytesRead, imageBufferSize);
+            LOG("%s", imageBuffer);
+            if (imageBuffer)
+            {
+                free(imageBuffer);
+            }
             return;
         }
 
+        // LOG("5");
         Image image = {
             .data = imageBuffer,
             .width = scaleWidth,
@@ -1488,6 +1423,7 @@ void HandleLoadPreviewButtonInteraction(
         {
             ERROR("Failed to load texture from image.");
         }
+        // LOG("6");
         UnloadImage(image);
     }
 }
@@ -2025,8 +1961,10 @@ void RenderButton(
         },
     })
     {
-        Clay_OnHover(onHoverFunction, userData);
-
+        if (!isDisabled)
+        {
+            Clay_OnHover(onHoverFunction, userData);
+        }
         CLAY_TEXT(label, /*buttonData.isDisabled[buttonId]*/ isDisabled ? TEXT_CONFIG_FAINT : TEXT_CONFIG_BOLD);
     }
 }
@@ -3073,17 +3011,17 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     CLAY_STRING("Output Type:"),
                     DROPDOWN_ID_OUTPUT_TYPE,
                     streamData.streamCounts[STREAM_ID_VIDEO] > 0   ? streamData.streamCounts[STREAM_ID_AUDIO] > 0 ? (DropdownOption[]){
-                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
-                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_AUDIO,
-                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
-                                                                                                                      DROPDOWN_OPTION_NULL,
-                                                                                                                  }
+                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
+                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_AUDIO,
+                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
+                                                                                                                        DROPDOWN_OPTION_NULL,
+                                                                                                                    }
                                                                                                                   : (DropdownOption[]){
-                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
-                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
-                                                                                                                      DROPDOWN_OPTION_NULL,
-                                                                                                                  }
-                      : streamData.streamCounts[STREAM_ID_AUDIO] > 0 ? (DropdownOption[]){
+                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
+                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
+                                                                                                                        DROPDOWN_OPTION_NULL,
+                                                                                                                    }
+                    : streamData.streamCounts[STREAM_ID_AUDIO] > 0 ? (DropdownOption[]){
                                                                          DROPDOWN_OPTION_OUTPUT_TYPE_AUDIO,
                                                                          DROPDOWN_OPTION_NULL,
                                                                      }
