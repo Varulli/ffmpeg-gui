@@ -844,7 +844,7 @@ char *childReadAll(ChildProcessData *c, size_t *outSize)
         DWORD nread = 0;
 
         BOOL ok = ReadFile(
-            c->stdout_read,
+            c->stdoutRead,
             buf,
             sizeof(buf),
             &nread,
@@ -3011,17 +3011,17 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     CLAY_STRING("Output Type:"),
                     DROPDOWN_ID_OUTPUT_TYPE,
                     streamData.streamCounts[STREAM_ID_VIDEO] > 0   ? streamData.streamCounts[STREAM_ID_AUDIO] > 0 ? (DropdownOption[]){
-                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
-                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_AUDIO,
-                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
-                                                                                                                        DROPDOWN_OPTION_NULL,
-                                                                                                                    }
+                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
+                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_AUDIO,
+                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
+                                                                                                                      DROPDOWN_OPTION_NULL,
+                                                                                                                  }
                                                                                                                   : (DropdownOption[]){
-                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
-                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
-                                                                                                                        DROPDOWN_OPTION_NULL,
-                                                                                                                    }
-                    : streamData.streamCounts[STREAM_ID_AUDIO] > 0 ? (DropdownOption[]){
+                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
+                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
+                                                                                                                      DROPDOWN_OPTION_NULL,
+                                                                                                                  }
+                      : streamData.streamCounts[STREAM_ID_AUDIO] > 0 ? (DropdownOption[]){
                                                                          DROPDOWN_OPTION_OUTPUT_TYPE_AUDIO,
                                                                          DROPDOWN_OPTION_NULL,
                                                                      }
