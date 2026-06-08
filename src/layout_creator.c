@@ -4,6 +4,7 @@
 #include "cJSON.h"
 #include <stdio.h>
 #include <stddef.h>
+#include <ctype.h>
 
 #ifdef _WIN32
 #include <windef.h>
@@ -401,6 +402,77 @@ const char *trim(const char *str)
         }
     }
     return str + i;
+}
+
+bool extensionEqualsIgnoreCase(const char *a, const char *b)
+{
+    if (a == NULL || b == NULL)
+    {
+        return false;
+    }
+
+    while (*a && *b)
+    {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b))
+        {
+            return false;
+        }
+        a++;
+        b++;
+    }
+
+    return *a == *b;
+}
+
+char *ReadFileToString(FILE *fp, size_t *outSize)
+{
+    if (fp == NULL || outSize == NULL)
+    {
+        return NULL;
+    }
+
+    size_t cap = 4096;
+    size_t len = 0;
+    char *buffer = malloc(cap);
+    if (buffer == NULL)
+    {
+        return NULL;
+    }
+
+    for (;;)
+    {
+        if (len + 4096 + 1 > cap)
+        {
+            size_t newCap = cap * 2;
+            while (len + 4096 + 1 > newCap)
+            {
+                newCap *= 2;
+            }
+            char *tmp = realloc(buffer, newCap);
+            if (tmp == NULL)
+            {
+                free(buffer);
+                return NULL;
+            }
+            buffer = tmp;
+            cap = newCap;
+        }
+
+        size_t n = fread(buffer + len, 1, 4096, fp);
+        if (n > 0)
+        {
+            len += n;
+        }
+
+        if (n < 4096)
+        {
+            break;
+        }
+    }
+
+    buffer[len] = '\0';
+    *outSize = len;
+    return buffer;
 }
 
 const char *getTextboxValue(TextboxID textboxId)
@@ -829,6 +901,7 @@ char *childReadAll(ChildProcessData *c, size_t *outSize)
         return NULL;
     }
 
+    int origFlags = flags;
     if (fcntl(c->stdoutfd, F_SETFL, flags & ~O_NONBLOCK) < 0)
     {
         free(out);
@@ -877,6 +950,12 @@ char *childReadAll(ChildProcessData *c, size_t *outSize)
             free(out);
             ERROR("childReadAll(): read() error");
             perror("ffmpeg");
+#ifndef _WIN32
+            if (fcntl(c->stdoutfd, F_SETFL, origFlags) < 0)
+            {
+                ERROR("childReadAll(): failed to restore fd flags");
+            }
+#endif
             return NULL;
         }
 
@@ -898,6 +977,12 @@ char *childReadAll(ChildProcessData *c, size_t *outSize)
             {
                 free(out);
                 ERROR("childReadAll(): failed out resize");
+#ifndef _WIN32
+                if (fcntl(c->stdoutfd, F_SETFL, origFlags) < 0)
+                {
+                    ERROR("childReadAll(): failed to restore fd flags");
+                }
+#endif
                 return NULL;
             }
 
@@ -907,6 +992,13 @@ char *childReadAll(ChildProcessData *c, size_t *outSize)
         memcpy(out + len, buf, n);
         len += n;
     }
+
+#ifndef _WIN32
+    if (fcntl(c->stdoutfd, F_SETFL, origFlags) < 0)
+    {
+        ERROR("childReadAll(): failed to restore fd flags");
+    }
+#endif
 
     out[len] = '\0';
     *outSize = len;
@@ -974,7 +1066,7 @@ int convert()
     switch (outputType)
     {
     case 'v':
-        if (outputExt == NULL || (strcmp(outputExt, ".gif") && strcmp(outputExt, ".mkv") && strcmp(outputExt, ".mov") && strcmp(outputExt, ".mp4") && strcmp(outputExt, ".webm")))
+        if (outputExt == NULL || (!extensionEqualsIgnoreCase(outputExt, ".gif") && !extensionEqualsIgnoreCase(outputExt, ".mkv") && !extensionEqualsIgnoreCase(outputExt, ".mov") && !extensionEqualsIgnoreCase(outputExt, ".mp4") && !extensionEqualsIgnoreCase(outputExt, ".webm")))
         {
             LOG("VIDEO - changing ext (%s -> %s)", outputExt, defaultExtVideo);
             outputExt = defaultExtVideo;
@@ -982,7 +1074,7 @@ int convert()
         break;
 
     case 'a':
-        if (outputExt == NULL || (strcmp(outputExt, ".wav") && strcmp(outputExt, ".wave") && strcmp(outputExt, ".mp3") && strcmp(outputExt, ".m4a") && strcmp(outputExt, ".flac") && strcmp(outputExt, ".ogg") && strcmp(outputExt, ".oga") && strcmp(outputExt, ".opus")))
+        if (outputExt == NULL || (!extensionEqualsIgnoreCase(outputExt, ".wav") && !extensionEqualsIgnoreCase(outputExt, ".wave") && !extensionEqualsIgnoreCase(outputExt, ".mp3") && !extensionEqualsIgnoreCase(outputExt, ".m4a") && !extensionEqualsIgnoreCase(outputExt, ".flac") && !extensionEqualsIgnoreCase(outputExt, ".ogg") && !extensionEqualsIgnoreCase(outputExt, ".oga") && !extensionEqualsIgnoreCase(outputExt, ".opus")))
         {
             LOG("AUDIO - changing ext (%s -> %s)", outputExt, defaultExtAudio);
             outputExt = defaultExtAudio;
@@ -990,7 +1082,7 @@ int convert()
         break;
 
     case 'i':
-        if (outputExt == NULL || (strcmp(outputExt, ".jpg") && strcmp(outputExt, ".jpeg") && strcmp(outputExt, ".jpe") && strcmp(outputExt, ".jfif") && strcmp(outputExt, ".png") && strcmp(outputExt, ".tiff") && strcmp(outputExt, ".tif") && strcmp(outputExt, ".webp")))
+        if (outputExt == NULL || (!extensionEqualsIgnoreCase(outputExt, ".jpg") && !extensionEqualsIgnoreCase(outputExt, ".jpeg") && !extensionEqualsIgnoreCase(outputExt, ".jpe") && !extensionEqualsIgnoreCase(outputExt, ".jfif") && !extensionEqualsIgnoreCase(outputExt, ".png") && !extensionEqualsIgnoreCase(outputExt, ".tiff") && !extensionEqualsIgnoreCase(outputExt, ".tif") && !extensionEqualsIgnoreCase(outputExt, ".webp")))
         {
             LOG("IMAGE - changing ext (%s -> %s)", outputExt, defaultExtImage);
             outputExt = defaultExtImage;
@@ -1037,8 +1129,8 @@ int convert()
     free(fullOutputPath);
 
     bool outputVideo = outputType == 'v';
-    bool gifInput = strcmp(GetFileExtension(streamData.inputPath), ".gif") == 0;
-    bool outputAudio = (outputType == 'a' || (outputVideo && strcmp(outputExt, ".gif"))) && streamData.streamCounts[STREAM_ID_AUDIO] > 0;
+    bool gifInput = extensionEqualsIgnoreCase(GetFileExtension(streamData.inputPath), ".gif");
+    bool outputAudio = (outputType == 'a' || (outputVideo && !extensionEqualsIgnoreCase(outputExt, ".gif"))) && streamData.streamCounts[STREAM_ID_AUDIO] > 0;
     bool outputImage = outputType == 'i';
 
     StringBuilder sb;
@@ -1192,25 +1284,21 @@ void HandleLoadInputButtonInteraction(
             return;
         }
 
-        ret = fread(buffer, 1, sizeof(buffer), fp);
-        if (ferror(fp))
+        size_t jsonSize = 0;
+        char *jsonText = ReadFileToString(fp, &jsonSize);
+        int pcloseRet = pclose(fp);
+        if (jsonText == NULL)
         {
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
-            {
-                clearerr(fp);
-            }
-            else
-            {
-                ERROR("Failed to read command output (%d).", ret);
-                // LOG("%s", buffer);
-                perror("ffmpeg-gui");
-                pclose(fp);
-                return;
-            }
+            ERROR("Failed to read ffprobe output.");
+            return;
         }
-        pclose(fp);
+        if (pcloseRet != 0)
+        {
+            ERROR("ffprobe exited with non-zero status (%d).", pcloseRet);
+        }
 
-        cJSON *json = cJSON_ParseWithLength(buffer, ret);
+        cJSON *json = cJSON_ParseWithLength(jsonText, jsonSize);
+        free(jsonText);
         if (json == NULL)
         {
             ERROR("Failed to parse output as JSON.");
@@ -1387,12 +1475,27 @@ void HandleLoadPreviewButtonInteraction(
         }
 
         // LOG("3");
-        size_t imageBufferSize = scaleWidth * scaleHeight * 4;
-        // unsigned char *imageBuffer = calloc(imageBufferSize, sizeof(unsigned char));
+        if (scaleWidth <= 0 || scaleHeight <= 0)
+        {
+            ERROR("Invalid preview dimensions (%d x %d)", scaleWidth, scaleHeight);
+            childReset(&imageProcess);
+            return;
+        }
+
+        uint64_t pixelCount = (uint64_t)scaleWidth * (uint64_t)scaleHeight;
+        if (pixelCount > 10000ULL * 10000ULL)
+        {
+            ERROR("Preview dimensions too large (%d x %d)", scaleWidth, scaleHeight);
+            childReset(&imageProcess);
+            return;
+        }
+
+        size_t imageBufferSize = (size_t)pixelCount * 4;
         size_t totalBytesRead = 0;
 
         // LOG("4");
         unsigned char *imageBuffer = childReadAll(&imageProcess, &totalBytesRead);
+        childReset(&imageProcess);
 
         if (imageBuffer == NULL)
         {
@@ -1403,10 +1506,7 @@ void HandleLoadPreviewButtonInteraction(
         {
             ERROR("Total bytes read (%zu) less than image buffer size (%zu)", totalBytesRead, imageBufferSize);
             LOG("%s", imageBuffer);
-            if (imageBuffer)
-            {
-                free(imageBuffer);
-            }
+            free(imageBuffer);
             return;
         }
 
@@ -1418,11 +1518,20 @@ void HandleLoadPreviewButtonInteraction(
             .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
             .mipmaps = 1,
         };
-        previewImageData.imageTexture = LoadTextureFromImage(image);
-        if (previewImageData.imageTexture.id == 0)
+
+        Texture2D newTexture = LoadTextureFromImage(image);
+        if (newTexture.id == 0)
         {
             ERROR("Failed to load texture from image.");
+            UnloadImage(image);
+            return;
         }
+
+        if (previewImageData.imageTexture.id != 0)
+        {
+            UnloadTexture(previewImageData.imageTexture);
+        }
+        previewImageData.imageTexture = newTexture;
         // LOG("6");
         UnloadImage(image);
     }
@@ -1532,7 +1641,8 @@ void HandleBrowseButtonInteraction(
         if (result == NFD_OKAY)
         {
             TextboxBuffer *buffer = &textboxData.textboxBuffers[index];
-            strncpy(buffer->chars, outPath, TEXTBOX_BUFFER_SIZE);
+            strncpy(buffer->chars, outPath, TEXTBOX_BUFFER_SIZE - 1);
+            buffer->chars[TEXTBOX_BUFFER_SIZE - 1] = '\0';
             buffer->length = strlen(buffer->chars);
             buffer->cursorPosition = buffer->length;
             NFD_FreePathU8(outPath);
@@ -2876,6 +2986,12 @@ void LayoutCreator_Initialize()
 void LayoutCreator_Destroy()
 {
     childKill(&streamData.convertProcess);
+
+    if (previewImageData.imageTexture.id != 0)
+    {
+        UnloadTexture(previewImageData.imageTexture);
+        previewImageData.imageTexture.id = 0;
+    }
 
     NFD_Quit();
 }
