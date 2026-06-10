@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <ctype.h>
+#include <stdarg.h>
 
 #ifdef _WIN32
 #include <windef.h>
@@ -53,7 +54,8 @@
 #define DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE {"Image", "i"}
 
 #define LOG(format, ...) printf("\x1b[33mLOG: " format "\x1b[0m\n", ##__VA_ARGS__)
-#define ERROR(format, ...) fprintf(stderr, "\x1b[31mERROR: " format "\x1b[0m\n", ##__VA_ARGS__)
+void LayoutCreator_ReportErrorf(const char *fmt, ...);
+#define ERROR(format, ...) LayoutCreator_ReportErrorf(format, ##__VA_ARGS__)
 
 #define CLAMP(val, min, max) (val < min) ? min : (val > max) ? max \
                                                              : val
@@ -298,7 +300,21 @@ typedef struct
     char inputPath[TEXTBOX_BUFFER_SIZE];
     size_t streamCounts[STREAM_ID_DUMMY_LAST];
     ChildProcessData convertProcess;
+    char convertOutput[8192];
+    size_t convertOutputLength;
 } StreamData;
+
+typedef struct
+{
+    char message[256];
+    double createdAt;
+} ErrorPopup;
+
+typedef struct
+{
+    ErrorPopup popups[4];
+    size_t count;
+} ErrorPopupData;
 
 typedef struct
 {
@@ -329,6 +345,7 @@ static TabData tabData;
 static ScrollData scrollData;
 static StreamData streamData;
 static ImageData previewImageData;
+static ErrorPopupData errorPopupData;
 
 static Clay_Padding defaultBoxPadding;
 static Clay_Padding buttonPadding;
@@ -482,6 +499,155 @@ const char *getTextboxValue(TextboxID textboxId)
         return textboxData.textboxBuffers[textboxId].chars;
     }
     return textboxData.textboxBuffers[textboxId].charsDefault;
+}
+
+static const char *LayoutCreator_SanitizeErrorMessage(const char *message)
+{
+    if (message == NULL || message[0] == '\0')
+    {
+        return "An unexpected error occurred.";
+    }
+
+    static char buffer[256];
+    size_t out = 0;
+    const char *p = message;
+
+    while (*p != '\0' && out + 1 < sizeof(buffer))
+    {
+        if (*p == '\r')
+        {
+            p++;
+            continue;
+        }
+        if (*p == '\n')
+        {
+            break;
+        }
+        if (*p == '\x1b')
+        {
+            while (*p != '\0' && *p != 'm')
+            {
+                p++;
+            }
+            if (*p == 'm')
+            {
+                p++;
+            }
+            continue;
+        }
+        buffer[out++] = *p;
+        p++;
+    }
+    buffer[out] = '\0';
+
+    char *trimmed = buffer;
+    while (*trimmed == ' ' || *trimmed == '\t')
+    {
+        trimmed++;
+    }
+
+    if (strstr(trimmed, "height") != NULL && strstr(trimmed, "divisible by 2") != NULL)
+    {
+        return "The selected output height must be divisible by 2 for this conversion.";
+    }
+    if (strstr(trimmed, "Invalid argument") != NULL)
+    {
+        return "The requested conversion settings could not be applied.";
+    }
+    if (strstr(trimmed, "Error") != NULL || strstr(trimmed, "error") != NULL)
+    {
+        return trimmed;
+    }
+
+    return trimmed;
+}
+
+static void LayoutCreator_RemoveErrorPopup(size_t index)
+{
+    if (index >= errorPopupData.count)
+    {
+        return;
+    }
+
+    for (size_t i = index; i + 1 < errorPopupData.count; i++)
+    {
+        errorPopupData.popups[i] = errorPopupData.popups[i + 1];
+    }
+    errorPopupData.count--;
+}
+
+void HandleErrorPopupCloseButtonInteraction(
+    Clay_ElementId elementId,
+    Clay_PointerData pointerData,
+    intptr_t userData)
+{
+    if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
+    {
+        LayoutCreator_RemoveErrorPopup((size_t)userData);
+    }
+}
+
+void LayoutCreator_ReportErrorf(const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    char message[512];
+    vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+
+    fprintf(stderr, "\x1b[31mERROR: %s\x1b[0m\n", message);
+
+    const char *displayMessage = LayoutCreator_SanitizeErrorMessage(message);
+    if (errorPopupData.count < sizeof(errorPopupData.popups) / sizeof(errorPopupData.popups[0]))
+    {
+        errorPopupData.popups[errorPopupData.count++] = (ErrorPopup){0};
+        snprintf(errorPopupData.popups[errorPopupData.count - 1].message, sizeof(errorPopupData.popups[errorPopupData.count - 1].message), "%s", displayMessage);
+        errorPopupData.popups[errorPopupData.count - 1].createdAt = GetTime();
+    }
+    else
+    {
+        for (size_t i = 1; i < errorPopupData.count; i++)
+        {
+            errorPopupData.popups[i - 1] = errorPopupData.popups[i];
+        }
+        snprintf(errorPopupData.popups[errorPopupData.count - 1].message, sizeof(errorPopupData.popups[errorPopupData.count - 1].message), "%s", displayMessage);
+        errorPopupData.popups[errorPopupData.count - 1].createdAt = GetTime();
+    }
+}
+
+static void LayoutCreator_AppendProcessOutput(const char *data, size_t dataLength)
+{
+    if (data == NULL || dataLength == 0)
+    {
+        return;
+    }
+
+    size_t available = sizeof(streamData.convertOutput) - streamData.convertOutputLength - 1;
+    if (available == 0)
+    {
+        return;
+    }
+
+    size_t copyLength = dataLength < available ? dataLength : available;
+    memcpy(streamData.convertOutput + streamData.convertOutputLength, data, copyLength);
+    streamData.convertOutputLength += copyLength;
+    streamData.convertOutput[streamData.convertOutputLength] = '\0';
+}
+
+static void LayoutCreator_UpdateErrorPopups(void)
+{
+    double now = GetTime();
+    size_t activeCount = 0;
+
+    for (size_t i = 0; i < errorPopupData.count; i++)
+    {
+        if (now - errorPopupData.popups[i].createdAt < 10.0)
+        {
+            errorPopupData.popups[activeCount++] = errorPopupData.popups[i];
+        }
+    }
+
+    errorPopupData.count = activeCount;
 }
 
 const char *getDropdownValue(DropdownID dropdownId)
@@ -1034,6 +1200,9 @@ int convert()
 {
     char buffer[4096];
     int ret;
+
+    streamData.convertOutputLength = 0;
+    streamData.convertOutput[0] = '\0';
 
     // Validate input path
     if (!FileExists(streamData.inputPath))
@@ -2828,6 +2997,97 @@ void RenderTabContentSubtitles(bool visible)
     }
 }
 
+void RenderErrorPopups(void)
+{
+    if (errorPopupData.count == 0)
+    {
+        return;
+    }
+
+    double now = GetTime();
+
+    CLAY({
+        .layout = {
+            .layoutDirection = CLAY_TOP_TO_BOTTOM,
+            .childGap = fontData.charHeightOverFour,
+        },
+        .backgroundColor = COLOR_TRANSPARENT,
+        .floating = {
+            .attachPoints = {
+                .element = CLAY_ATTACH_POINT_RIGHT_TOP,
+                .parent = CLAY_ATTACH_POINT_RIGHT_TOP,
+            },
+            .offset = (Clay_Vector2){-16, 16},
+            .attachTo = CLAY_ATTACH_TO_ROOT,
+        },
+    })
+    {
+        for (size_t i = 0; i < errorPopupData.count; i++)
+        {
+            double age = now - errorPopupData.popups[i].createdAt;
+            float alpha = 1.0f - (float)(age / 10.0f);
+            alpha = CLAMP(alpha, 0.35f, 1.0f);
+
+            Clay_Color popupColor = (Clay_Color){220, 60, 60, (uint8_t)(alpha * 230.0f)};
+            CLAY({
+                .layout = {
+                    .sizing = {
+                        .width = CLAY_SIZING_FIXED(320),
+                    },
+                    .padding = defaultBoxPadding,
+                },
+                .backgroundColor = popupColor,
+                .cornerRadius = CLAY_CORNER_RADIUS(10),
+                .border = {
+                    .color = (Clay_Color){255, 255, 255, (uint8_t)(alpha * 80.0f)},
+                    .width = CLAY_BORDER_OUTSIDE(1),
+                },
+            })
+            {
+                if (Clay_Hovered())
+                {
+                    errorPopupData.popups[i].createdAt = now;
+                }
+
+                CLAY({
+                    .layout = {
+                        .childGap = fontData.charWidth,
+                        .childAlignment = {.y = CLAY_ALIGN_Y_CENTER},
+                    },
+                })
+                {
+                    Clay_String str = {
+                        .isStaticallyAllocated = true,
+                        .length = strlen(errorPopupData.popups[i].message),
+                        .chars = errorPopupData.popups[i].message,
+                    };
+                    CLAY_TEXT(str, CLAY_TEXT_CONFIG({
+                                       .fontId = FONT_ID_BODY,
+                                       .fontSize = fontData.fontSize,
+                                       .textColor = (Clay_Color){255, 255, 255, (uint8_t)(alpha * 255.0f)},
+                                   }));
+
+                    CLAY({
+                        .layout = {
+                            .sizing = {
+                                .width = CLAY_SIZING_FIXED(24),
+                                .height = CLAY_SIZING_FIXED(24),
+                            },
+                            .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
+                        },
+                        .backgroundColor = Clay_Hovered() ? (Clay_Color){255, 255, 255, 80} : COLOR_TRANSPARENT,
+                        .cornerRadius = CLAY_CORNER_RADIUS(8),
+                    })
+                    {
+                        Clay_OnHover(HandleErrorPopupCloseButtonInteraction, i);
+                        CLAY_TEXT(CLAY_STRING("x"), TEXT_CONFIG_BOLD);
+                    }
+                }
+            }
+        }
+    }
+}
+
 void setStyles()
 {
     defaultBoxPadding = (Clay_Padding){
@@ -2966,7 +3226,11 @@ void LayoutCreator_Initialize()
             .stdoutfd = 0,
 #endif
         },
+        .convertOutput = {0},
+        .convertOutputLength = 0,
     };
+
+    errorPopupData = (ErrorPopupData){0};
 
     previewImageData = (ImageData){
         .imageTexture = {0},
@@ -3000,6 +3264,8 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 {
     Clay_BeginLayout();
 
+    LayoutCreator_UpdateErrorPopups();
+
     textboxData.hoveredTextbox = -1;
     textboxData.focusData.focusRegistered = false;
 
@@ -3014,18 +3280,31 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
     if (streamData.convertProcess.valid)
     {
-        if (childPoll(&streamData.convertProcess))
+        while (childPoll(&streamData.convertProcess))
         {
             char buffer[4096];
             int n = childRead(&streamData.convertProcess, buffer, sizeof(buffer));
             if (n > 0)
             {
+                LayoutCreator_AppendProcessOutput(buffer, (size_t)n);
                 LOG("%s", buffer);
+            }
+            else
+            {
+                break;
             }
         }
 
         if (childExited(&streamData.convertProcess))
         {
+            if (streamData.convertOutputLength > 0)
+            {
+                const char *errorMessage = LayoutCreator_SanitizeErrorMessage(streamData.convertOutput);
+                if (strstr(errorMessage, "The selected output height") != NULL || strstr(errorMessage, "Invalid argument") != NULL || strstr(errorMessage, "Error") != NULL || strstr(errorMessage, "error") != NULL)
+                {
+                    LayoutCreator_ReportErrorf("%s", errorMessage);
+                }
+            }
             childReset(&streamData.convertProcess);
         }
     }
@@ -3048,6 +3327,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
     })
     {
         RenderScrollBar(SCROLL_ID_WINDOW, scrollingWindowVertical, scrollingWindowHorizontal);
+        RenderErrorPopups();
 
         if (scrollData.scrolling == SCROLL_ID_DUMMY_LAST)
         {
@@ -3127,17 +3407,17 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     CLAY_STRING("Output Type:"),
                     DROPDOWN_ID_OUTPUT_TYPE,
                     streamData.streamCounts[STREAM_ID_VIDEO] > 0   ? streamData.streamCounts[STREAM_ID_AUDIO] > 0 ? (DropdownOption[]){
-                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
-                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_AUDIO,
-                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
-                                                                                                                      DROPDOWN_OPTION_NULL,
-                                                                                                                  }
+                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
+                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_AUDIO,
+                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
+                                                                                                                        DROPDOWN_OPTION_NULL,
+                                                                                                                    }
                                                                                                                   : (DropdownOption[]){
-                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
-                                                                                                                      DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
-                                                                                                                      DROPDOWN_OPTION_NULL,
-                                                                                                                  }
-                      : streamData.streamCounts[STREAM_ID_AUDIO] > 0 ? (DropdownOption[]){
+                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_VIDEO,
+                                                                                                                        DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE,
+                                                                                                                        DROPDOWN_OPTION_NULL,
+                                                                                                                    }
+                    : streamData.streamCounts[STREAM_ID_AUDIO] > 0 ? (DropdownOption[]){
                                                                          DROPDOWN_OPTION_OUTPUT_TYPE_AUDIO,
                                                                          DROPDOWN_OPTION_NULL,
                                                                      }
@@ -3228,31 +3508,6 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                     },
                 })
                 {
-                    // switch (tabData.selectedTab)
-                    // {
-                    // case TAB_ID_DIMENSIONS:
-                    //     RenderTabContentDimensions();
-                    //     break;
-
-                    // case TAB_ID_VIDEO:
-                    //     RenderTabContentVideo();
-                    //     break;
-
-                    // case TAB_ID_AUDIO:
-                    //     RenderTabContentAudio();
-                    //     break;
-
-                    // case TAB_ID_SUBTITLES:
-                    //     RenderTabContentSubtitles();
-                    //     break;
-
-                    // case TAB_ID_DUMMY_LAST:
-                    //     break;
-
-                    // default:
-                    //     ERROR("Invalid tab ID selected (%zu).", tabData.selectedTab);
-                    //     break;
-                    // }
                     RenderTabContentDimensions(tabData.selectedTab == TAB_ID_DIMENSIONS);
                     RenderTabContentVideo(tabData.selectedTab == TAB_ID_VIDEO);
                     RenderTabContentAudio(tabData.selectedTab == TAB_ID_AUDIO);
