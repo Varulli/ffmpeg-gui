@@ -1490,8 +1490,17 @@ void HandleLoadInputButtonInteraction(
             return;
         }
 
+        if (streamData.convertProcess.valid)
+        {
+            childKill(&streamData.convertProcess);
+        }
+        if (previewImageData.imageTexture.id != 0)
+        {
+            UnloadTexture(previewImageData.imageTexture);
+            previewImageData.imageTexture.id = 0;
+        }
+
         memset(&streamData, 0, sizeof(streamData));
-        memset(&previewImageData.imageTexture, 0, sizeof(Texture2D));
 
         cJSON *stream;
         size_t i = 0;
@@ -1526,7 +1535,7 @@ void HandleLoadInputButtonInteraction(
         }
         // LOG("v: %zu, a: %zu, s: %zu", streamData.streamCounts[STREAM_ID_VIDEO], streamData.streamCounts[STREAM_ID_AUDIO], streamData.streamCounts[STREAM_ID_SUBTITLES]);
 
-        memcpy(streamData.inputPath, trim(getTextboxValue(TEXTBOX_ID_INPUT_PATH)), TEXTBOX_BUFFER_SIZE);
+        snprintf(streamData.inputPath, sizeof(streamData.inputPath), "%s", trim(getTextboxValue(TEXTBOX_ID_INPUT_PATH)));
         cJSON_Delete(json);
         dropdownData.isInit[DROPDOWN_ID_OUTPUT_TYPE] = false;
     }
@@ -3585,9 +3594,9 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         if (ret >= 0 && ret < sizeof(temp))
         {
             TextboxBuffer *buffer = &textboxData.textboxBuffers[TEXTBOX_ID_INPUT_PATH];
-            memcpy(buffer->chars, temp, TEXTBOX_BUFFER_SIZE);
-            buffer->length = ret;
-            buffer->cursorPosition = ret;
+            snprintf(buffer->chars, sizeof(buffer->chars), "%s", temp);
+            buffer->length = strlen(buffer->chars);
+            buffer->cursorPosition = buffer->length;
         }
         else
         {
@@ -3749,6 +3758,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             }
             buffer->cursorPosition -= offset;
             buffer->length -= offset;
+            buffer->chars[buffer->length] = '\0';
             textboxData.focusData.focusStartTime = GetTime();
 
             if (buffer->numberboxConfig.isNumberbox)
@@ -3800,6 +3810,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 buffer->chars[i] = buffer->chars[i + offset];
             }
             buffer->length -= offset;
+            buffer->chars[buffer->length] = '\0';
             textboxData.focusData.focusStartTime = GetTime();
 
             if (buffer->numberboxConfig.isNumberbox)
