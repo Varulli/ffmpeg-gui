@@ -504,7 +504,7 @@ const char *getTextboxValue(TextboxID textboxId)
     return textboxData.textboxBuffers[textboxId].charsDefault;
 }
 
-static const char *LayoutCreator_SanitizeErrorMessage(const char *message)
+static const char *sanitizeErrorMessage(const char *message)
 {
     if (message == NULL || message[0] == '\0')
     {
@@ -565,7 +565,7 @@ static const char *LayoutCreator_SanitizeErrorMessage(const char *message)
     return trimmed;
 }
 
-static void LayoutCreator_RemoveErrorPopup(size_t index)
+static void removeErrorPopup(size_t index)
 {
     if (index >= errorPopupData.count)
     {
@@ -586,11 +586,11 @@ void HandleErrorPopupCloseButtonInteraction(
 {
     if (pointerData.state == CLAY_POINTER_DATA_RELEASED_THIS_FRAME)
     {
-        LayoutCreator_RemoveErrorPopup((size_t)userData);
+        removeErrorPopup((size_t)userData);
     }
 }
 
-void LayoutCreator_ReportErrorf(const char *fmt, ...)
+void reportErrorf(const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
@@ -598,7 +598,7 @@ void LayoutCreator_ReportErrorf(const char *fmt, ...)
     vsnprintf(message, sizeof(message), fmt, args);
     va_end(args);
 
-    const char *displayMessage = LayoutCreator_SanitizeErrorMessage(message);
+    const char *displayMessage = sanitizeErrorMessage(message);
     if (errorPopupData.count < sizeof(errorPopupData.popups) / sizeof(errorPopupData.popups[0]))
     {
         errorPopupData.popups[errorPopupData.count++] = (ErrorPopup){0};
@@ -616,7 +616,7 @@ void LayoutCreator_ReportErrorf(const char *fmt, ...)
     }
 }
 
-static void LayoutCreator_AppendProcessOutput(const char *data, size_t dataLength)
+static void appendProcessOutput(const char *data, size_t dataLength)
 {
     if (data == NULL || dataLength == 0)
     {
@@ -635,7 +635,7 @@ static void LayoutCreator_AppendProcessOutput(const char *data, size_t dataLengt
     streamData.convertOutput[streamData.convertOutputLength] = '\0';
 }
 
-static void LayoutCreator_UpdateErrorPopups(void)
+static void updateErrorPopups(void)
 {
     double now = GetTime();
     size_t activeCount = 0;
@@ -1197,6 +1197,102 @@ int childExited(ChildProcessData *c)
 #endif
 }
 
+static int ValidateSubtitleFile(const char *subtitlePath)
+{
+    if (subtitlePath == NULL || trim(subtitlePath)[0] == '\0')
+    {
+        ERROR("ValidateSubtitleFile(): subtitle path is empty.");
+        reportErrorf("Please select a subtitle file.");
+        return 1;
+    }
+
+    if (!FileExists(subtitlePath))
+    {
+        ERROR("ValidateSubtitleFile(): subtitle file does not exist (\"%s\").", subtitlePath);
+        reportErrorf("The selected subtitle file does not exist.");
+        return 2;
+    }
+
+    char buffer[4096];
+    int ret = snprintf(
+        buffer,
+        sizeof(buffer),
+        "ffprobe -v error -show_streams -of json \"%s\"",
+        subtitlePath);
+
+    if (ret < 0 || ret >= sizeof(buffer))
+    {
+        ERROR("ValidateSubtitleFile(): failed to format ffprobe command.");
+        reportErrorf("Unable to prepare subtitle validation.");
+        return 3;
+    }
+
+    FILE *fp = popen(buffer, "r");
+    if (fp == NULL)
+    {
+        ERROR("ValidateSubtitleFile(): failed to execute ffprobe for subtitle validation.");
+        reportErrorf("Unable to validate the subtitle file.");
+        return 4;
+    }
+
+    size_t jsonSize = 0;
+    char *jsonText = ReadFileToString(fp, &jsonSize);
+    int pcloseRet = pclose(fp);
+    if (jsonText == NULL)
+    {
+        ERROR("ValidateSubtitleFile(): failed to read ffprobe output for subtitle validation.");
+        reportErrorf("Unable to read subtitle metadata.");
+        return 5;
+    }
+    if (pcloseRet != 0)
+    {
+        ERROR("ValidateSubtitleFile(): ffprobe exited with non-zero status for subtitle validation (%d).", pcloseRet);
+        reportErrorf("The subtitle file could not be validated.");
+        free(jsonText);
+        return 6;
+    }
+
+    cJSON *json = cJSON_ParseWithLength(jsonText, jsonSize);
+    free(jsonText);
+    if (json == NULL)
+    {
+        ERROR("ValidateSubtitleFile(): failed to parse subtitle metadata JSON.");
+        reportErrorf("The subtitle file metadata could not be parsed.");
+        return 7;
+    }
+
+    cJSON *streams = cJSON_GetObjectItemCaseSensitive(json, "streams");
+    if (streams == NULL)
+    {
+        ERROR("ValidateSubtitleFile(): subtitle metadata JSON is missing the streams array.");
+        reportErrorf("The subtitle file metadata could not be read.");
+        cJSON_Delete(json);
+        return 8;
+    }
+
+    bool hasSubtitleStream = false;
+    cJSON *stream = NULL;
+    cJSON_ArrayForEach(stream, streams)
+    {
+        cJSON *codecType = cJSON_GetObjectItemCaseSensitive(stream, "codec_type");
+        if (cJSON_IsString(codecType) && codecType->valuestring != NULL && strcmp(codecType->valuestring, "subtitle") == 0)
+        {
+            hasSubtitleStream = true;
+            break;
+        }
+    }
+
+    cJSON_Delete(json);
+    if (!hasSubtitleStream)
+    {
+        ERROR("ValidateSubtitleFile(): subtitle file contains no subtitle stream (\"%s\").", subtitlePath);
+        reportErrorf("The selected subtitle file contains no subtitle stream.");
+        return 9;
+    }
+
+    return 0;
+}
+
 int convert()
 {
     char buffer[4096];
@@ -1209,7 +1305,7 @@ int convert()
     if (!FileExists(streamData.inputPath))
     {
         ERROR("Input file does not exist (\"%s\").", streamData.inputPath);
-        LayoutCreator_ReportErrorf("The selected input file does not exist.");
+        reportErrorf("The selected input file does not exist.");
         return 1;
     }
 
@@ -1218,21 +1314,21 @@ int convert()
     if (outputPath[0] == '\0')
     {
         ERROR("Output file is missing.");
-        LayoutCreator_ReportErrorf("Please choose an output file path.");
+        reportErrorf("Please choose an output file path.");
         return 2;
     }
     const char *outputDir = GetDirectoryPath(outputPath);
     if (!DirectoryExists(outputDir))
     {
         ERROR("Output directory does not exist (%s).", outputDir);
-        LayoutCreator_ReportErrorf("The selected output directory does not exist.");
+        reportErrorf("The selected output directory does not exist.");
         return 3;
     }
     const char *outputName = GetFileNameWithoutExt(outputPath);
     if (!IsFileNameValid(outputName))
     {
         ERROR("Output filename is invalid (%s).", outputName);
-        LayoutCreator_ReportErrorf("The output file name is invalid.");
+        reportErrorf("The output file name is invalid.");
         return 4;
     }
     char outputType = getDropdownValue(DROPDOWN_ID_OUTPUT_TYPE)[0];
@@ -1265,7 +1361,7 @@ int convert()
 
     default:
         ERROR("Invalid output type selected (%c).", outputType);
-        LayoutCreator_ReportErrorf("Unsupported output type selected.");
+        reportErrorf("Unsupported output type selected.");
         return 5;
         break;
     }
@@ -1286,21 +1382,21 @@ int convert()
     if (fullOutputPath == NULL)
     {
         ERROR("Failed to allocate memory.");
-        LayoutCreator_ReportErrorf("Internal error: unable to prepare output path.");
+        reportErrorf("Internal error: unable to prepare output path.");
         return 6;
     }
     ret = snprintf(fullOutputPath, fullOutputPathSize, "%s%c%s%s", outputDir, slash, outputName, outputExt);
     if (ret < 0 || ret >= fullOutputPathSize)
     {
         ERROR("Failed to write output into buffer.");
-        LayoutCreator_ReportErrorf("Internal error: unable to build the output file path.");
+        reportErrorf("Internal error: unable to build the output file path.");
         free(fullOutputPath);
         return 7;
     }
     if (strcmp(streamData.inputPath, fullOutputPath) == 0)
     {
         ERROR("Input and output are the same.");
-        LayoutCreator_ReportErrorf("The input and output files cannot be the same.");
+        reportErrorf("The input and output files cannot be the same.");
         free(fullOutputPath);
         return 8;
     }
@@ -1310,12 +1406,22 @@ int convert()
     bool gifInput = extensionEqualsIgnoreCase(GetFileExtension(streamData.inputPath), ".gif");
     bool outputAudio = (outputType == 'a' || (outputVideo && !extensionEqualsIgnoreCase(outputExt, ".gif"))) && streamData.streamCounts[STREAM_ID_AUDIO] > 0;
     bool outputImage = outputType == 'i';
+    bool burnSubtitles = getDropdownValue(DROPDOWN_ID_SUBTITLES)[0] != '\0';
+
+    if (burnSubtitles)
+    {
+        const char *subtitlePath = trim(getTextboxValue(TEXTBOX_ID_SUBTITLES_SOURCE));
+        ret = ValidateSubtitleFile(subtitlePath);
+        if (ret != 0)
+        {
+            return ret;
+        }
+    }
 
     StringBuilder sb;
     sbInit(&sb);
     if (outputVideo)
     {
-        bool burnSubtitles = getDropdownValue(DROPDOWN_ID_SUBTITLES)[0] != '\0';
         sbAppendf(
             &sb,
             "[0:v]fps=%s,trim=%s:%s,setpts=(PTS-STARTPTS)/%s,crop=%s:%s:%s:%s,scale=%s:%s%s%s%s%s[out_v];",
@@ -1463,7 +1569,7 @@ void HandleLoadInputButtonInteraction(
         if (fp == NULL)
         {
             ERROR("Failed to execute command and establish pipe.");
-            LayoutCreator_ReportErrorf("Unable to probe the selected input file.");
+            reportErrorf("Unable to probe the selected input file.");
             return;
         }
 
@@ -1473,13 +1579,13 @@ void HandleLoadInputButtonInteraction(
         if (jsonText == NULL)
         {
             ERROR("Failed to read ffprobe output.");
-            LayoutCreator_ReportErrorf("Unable to read metadata from the input file.");
+            reportErrorf("Unable to read metadata from the input file.");
             return;
         }
         if (pcloseRet != 0)
         {
             ERROR("ffprobe exited with non-zero status (%d).", pcloseRet);
-            LayoutCreator_ReportErrorf("Unable to read metadata from the input file.");
+            reportErrorf("Unable to read metadata from the input file.");
         }
 
         cJSON *json = cJSON_ParseWithLength(jsonText, jsonSize);
@@ -1487,7 +1593,7 @@ void HandleLoadInputButtonInteraction(
         if (json == NULL)
         {
             ERROR("Failed to parse output as JSON.");
-            LayoutCreator_ReportErrorf("An unexpected error occurred while reading input metadata.");
+            reportErrorf("An unexpected error occurred while reading input metadata.");
             const char *errorPtr = cJSON_GetErrorPtr();
             if (errorPtr != NULL)
             {
@@ -1503,7 +1609,7 @@ void HandleLoadInputButtonInteraction(
         if (streams == NULL)
         {
             ERROR("Failed to get streams object from JSON.");
-            LayoutCreator_ReportErrorf("An unexpected error occurred while reading input metadata.");
+            reportErrorf("An unexpected error occurred while reading input metadata.");
             cJSON_Delete(json);
             return;
         }
@@ -1547,7 +1653,7 @@ void HandleLoadInputButtonInteraction(
             else
             {
                 ERROR("Failed to read streams[%zu]", i);
-                LayoutCreator_ReportErrorf("An unexpected error occurred while reading input metadata.");
+                reportErrorf("An unexpected error occurred while reading input metadata.");
             }
 
             i++;
@@ -1588,7 +1694,7 @@ void HandleLoadPreviewButtonInteraction(
         if (fp == NULL)
         {
             ERROR("Failed to execute command and establish pipe.");
-            LayoutCreator_ReportErrorf("Unable to probe preview image dimensions.");
+            reportErrorf("Unable to probe preview image dimensions.");
             return;
         }
 
@@ -1599,7 +1705,7 @@ void HandleLoadPreviewButtonInteraction(
         if (ret != 2)
         {
             ERROR("Failed to read command output.");
-            LayoutCreator_ReportErrorf("Unable to read preview metadata from the input file.");
+            reportErrorf("Unable to read preview metadata from the input file.");
             return;
         }
 
@@ -1622,7 +1728,7 @@ void HandleLoadPreviewButtonInteraction(
         if (scaleWidth == -1 && scaleHeight == -1)
         {
             ERROR("Both scale dimensions are -1.");
-            LayoutCreator_ReportErrorf("Please enter at least one valid preview scale dimension.");
+            reportErrorf("Please enter at least one valid preview scale dimension.");
             return;
         }
         if (scaleWidth == -1)
@@ -1671,7 +1777,7 @@ void HandleLoadPreviewButtonInteraction(
         if (ret)
         {
             ERROR("Failed to create child process (%d)", ret);
-            LayoutCreator_ReportErrorf("Unable to generate preview image.");
+            reportErrorf("Unable to generate preview image.");
             return;
         }
 
@@ -1680,7 +1786,7 @@ void HandleLoadPreviewButtonInteraction(
         {
             ERROR("Invalid preview dimensions (%d x %d)", scaleWidth, scaleHeight);
             childReset(&imageProcess);
-            LayoutCreator_ReportErrorf("Invalid preview dimensions.");
+            reportErrorf("Invalid preview dimensions.");
             return;
         }
 
@@ -1689,7 +1795,7 @@ void HandleLoadPreviewButtonInteraction(
         {
             ERROR("Preview dimensions too large (%d x %d)", scaleWidth, scaleHeight);
             childReset(&imageProcess);
-            LayoutCreator_ReportErrorf("Preview size is too large.");
+            reportErrorf("Preview size is too large.");
             return;
         }
 
@@ -1703,13 +1809,13 @@ void HandleLoadPreviewButtonInteraction(
         if (imageBuffer == NULL)
         {
             ERROR("NULL imageBuffer");
-            LayoutCreator_ReportErrorf("Unable to allocate memory for preview image.");
+            reportErrorf("Unable to allocate memory for preview image.");
             return;
         }
         if (totalBytesRead != imageBufferSize)
         {
             ERROR("Total bytes read (%zu) less than image buffer size (%zu)", totalBytesRead, imageBufferSize);
-            LayoutCreator_ReportErrorf("Unable to read the full preview image data.");
+            reportErrorf("Unable to read the full preview image data.");
             LOG("%s", imageBuffer);
             free(imageBuffer);
             return;
@@ -1728,7 +1834,7 @@ void HandleLoadPreviewButtonInteraction(
         if (newTexture.id == 0)
         {
             ERROR("Failed to load texture from image.");
-            LayoutCreator_ReportErrorf("Unable to create preview texture.");
+            reportErrorf("Unable to create preview texture.");
             UnloadImage(image);
             return;
         }
@@ -1826,7 +1932,7 @@ void HandleBrowseButtonInteraction(
 
             default:
                 ERROR("Invalid output type selected (%c)", outputType);
-                LayoutCreator_ReportErrorf("Unable to open save dialog for the selected output type.");
+                reportErrorf("Unable to open save dialog for the selected output type.");
                 return;
                 break;
             }
@@ -1861,7 +1967,7 @@ void HandleBrowseButtonInteraction(
         else
         {
             ERROR("%s", NFD_GetError());
-            LayoutCreator_ReportErrorf("A file dialog error occurred. Please try again.");
+            reportErrorf("A file dialog error occurred. Please try again.");
         }
     }
 }
@@ -1877,7 +1983,6 @@ void HandleConvertButtonInteraction(
         if (ret)
         {
             ERROR("Convert failed (%d)", ret);
-            LayoutCreator_ReportErrorf("Conversion failed. See console for details.");
         }
     }
 }
@@ -1893,7 +1998,7 @@ void HandleConvertCancelButtonInteraction(
         if (ret)
         {
             ERROR("Convert cancel failed");
-            LayoutCreator_ReportErrorf("Unable to cancel conversion.");
+            reportErrorf("Unable to cancel conversion.");
         }
     }
 }
@@ -3076,6 +3181,11 @@ void RenderErrorPopups(void)
                         .width = CLAY_SIZING_FIXED(320),
                     },
                     .padding = defaultBoxPadding,
+                    .childGap = fontData.charWidth,
+                    .childAlignment = {
+                        .x = CLAY_ALIGN_X_RIGHT,
+                        .y = CLAY_ALIGN_Y_CENTER,
+                    },
                 },
                 .backgroundColor = popupColor,
                 .cornerRadius = CLAY_CORNER_RADIUS(10),
@@ -3090,40 +3200,40 @@ void RenderErrorPopups(void)
                     errorPopupData.popups[i].createdAt = now;
                 }
 
+                // CLAY({
+                //     .layout = {
+                //         .childGap = fontData.charWidth,
+                //         .childAlignment = {.y = CLAY_ALIGN_Y_CENTER},
+                //     },
+                // })
+                // {
+                Clay_String str = {
+                    .isStaticallyAllocated = true,
+                    .length = strlen(errorPopupData.popups[i].message),
+                    .chars = errorPopupData.popups[i].message,
+                };
+                CLAY_TEXT(str, CLAY_TEXT_CONFIG({
+                                   .fontId = FONT_ID_BODY,
+                                   .fontSize = fontData.fontSize,
+                                   .textColor = (Clay_Color){255, 255, 255, (uint8_t)(alpha * 255.0f)},
+                               }));
+
                 CLAY({
                     .layout = {
-                        .childGap = fontData.charWidth,
-                        .childAlignment = {.y = CLAY_ALIGN_Y_CENTER},
+                        .sizing = {
+                            .width = CLAY_SIZING_FIXED(24),
+                            .height = CLAY_SIZING_FIXED(24),
+                        },
+                        .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
                     },
+                    .backgroundColor = Clay_Hovered() ? (Clay_Color){255, 255, 255, 80} : COLOR_TRANSPARENT,
+                    .cornerRadius = CLAY_CORNER_RADIUS(8),
                 })
                 {
-                    Clay_String str = {
-                        .isStaticallyAllocated = true,
-                        .length = strlen(errorPopupData.popups[i].message),
-                        .chars = errorPopupData.popups[i].message,
-                    };
-                    CLAY_TEXT(str, CLAY_TEXT_CONFIG({
-                                       .fontId = FONT_ID_BODY,
-                                       .fontSize = fontData.fontSize,
-                                       .textColor = (Clay_Color){255, 255, 255, (uint8_t)(alpha * 255.0f)},
-                                   }));
-
-                    CLAY({
-                        .layout = {
-                            .sizing = {
-                                .width = CLAY_SIZING_FIXED(24),
-                                .height = CLAY_SIZING_FIXED(24),
-                            },
-                            .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER},
-                        },
-                        .backgroundColor = Clay_Hovered() ? (Clay_Color){255, 255, 255, 80} : COLOR_TRANSPARENT,
-                        .cornerRadius = CLAY_CORNER_RADIUS(8),
-                    })
-                    {
-                        Clay_OnHover(HandleErrorPopupCloseButtonInteraction, i);
-                        CLAY_TEXT(CLAY_STRING("x"), TEXT_CONFIG_BOLD);
-                    }
+                    Clay_OnHover(HandleErrorPopupCloseButtonInteraction, i);
+                    CLAY_TEXT(CLAY_STRING("x"), TEXT_CONFIG_BOLD);
                 }
+                // }
             }
         }
     }
@@ -3305,7 +3415,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 {
     Clay_BeginLayout();
 
-    LayoutCreator_UpdateErrorPopups();
+    updateErrorPopups();
 
     textboxData.hoveredTextbox = -1;
     textboxData.focusData.focusRegistered = false;
@@ -3327,7 +3437,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             int n = childRead(&streamData.convertProcess, buffer, sizeof(buffer));
             if (n > 0)
             {
-                LayoutCreator_AppendProcessOutput(buffer, (size_t)n);
+                appendProcessOutput(buffer, (size_t)n);
                 LOG("%s", buffer);
             }
             else
@@ -3340,10 +3450,10 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         {
             if (streamData.convertOutputLength > 0)
             {
-                const char *errorMessage = LayoutCreator_SanitizeErrorMessage(streamData.convertOutput);
+                const char *errorMessage = sanitizeErrorMessage(streamData.convertOutput);
                 if (strstr(errorMessage, "The selected output height") != NULL || strstr(errorMessage, "Invalid argument") != NULL || strstr(errorMessage, "Error") != NULL || strstr(errorMessage, "error") != NULL)
                 {
-                    LayoutCreator_ReportErrorf("%s", errorMessage);
+                    reportErrorf("%s", errorMessage);
                 }
             }
             childReset(&streamData.convertProcess);
@@ -3633,7 +3743,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         else
         {
             ERROR("Input file path is too long.");
-            LayoutCreator_ReportErrorf("The dropped file path is too long to use.");
+            reportErrorf("The dropped file path is too long to use.");
         }
 
         UnloadDroppedFiles(pathList);
