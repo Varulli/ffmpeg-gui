@@ -1273,7 +1273,7 @@ int convert()
     }
 #endif
 
-    LOG("dir: %s\nname: %s\next: %s", outputDir, outputName, outputExt);
+    // LOG("dir: %s\nname: %s\next: %s", outputDir, outputName, outputExt);
 
     size_t fullOutputPathSize = strlen(outputDir) + strlen(outputName) + strlen(outputExt) + 2;
     char *fullOutputPath = malloc(fullOutputPathSize);
@@ -1380,7 +1380,7 @@ int convert()
         argvPush(&a, strdup("-map"));
         argvPush(&a, strdup("[out_v]"));
     }
-    if (outputVideo && gifInput)
+    if (outputVideo && !gifInput)
     {
         argvPush(&a, strdup("-c:v"));
         argvPush(&a, strdup("libx264"));
@@ -1398,6 +1398,10 @@ int convert()
         argvPush(&a, strdup("1"));
     }
     argvPush(&a, argprintf("%s%c%s%s", outputDir, slash, outputName, outputExt));
+
+    char *cmdline = buildCmdline(a.v);
+    LOG("cmd = \"%s\"", cmdline);
+    free(cmdline);
 
     ret = childCreate(&streamData.convertProcess, a.v);
     argvFree(&a);
@@ -1524,7 +1528,7 @@ void HandleLoadInputButtonInteraction(
 
             i++;
         }
-        // LOG("v: %zu, a: %zu, s: %zu", streamData.streamCounts[STREAM_ID_VIDEO], streamData.streamCounts[STREAM_ID_AUDIO], streamData.streamCounts[STREAM_ID_SUBTITLES]);
+        LOG("v: %zu, a: %zu, s: %zu", streamData.streamCounts[STREAM_ID_VIDEO], streamData.streamCounts[STREAM_ID_AUDIO], streamData.streamCounts[STREAM_ID_SUBTITLES]);
 
         memcpy(streamData.inputPath, trim(getTextboxValue(TEXTBOX_ID_INPUT_PATH)), TEXTBOX_BUFFER_SIZE);
         cJSON_Delete(json);
