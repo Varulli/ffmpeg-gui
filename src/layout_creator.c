@@ -54,8 +54,11 @@
 #define DROPDOWN_OPTION_OUTPUT_TYPE_IMAGE {"Image", "i"}
 
 #define LOG(format, ...) printf("\x1b[33mLOG: " format "\x1b[0m\n", ##__VA_ARGS__)
-void LayoutCreator_ReportErrorf(const char *fmt, ...);
-#define ERROR(format, ...) LayoutCreator_ReportErrorf(format, ##__VA_ARGS__)
+#ifndef PRODUCTION
+#define ERROR(format, ...) printf("\x1b[31mERROR: " format "\x1b[0m\n", ##__VA_ARGS__)
+#else
+#define ERROR(format, ...) ((void)0)
+#endif
 
 #define CLAMP(val, min, max) (val < min) ? min : (val > max) ? max \
                                                              : val
@@ -594,8 +597,6 @@ void LayoutCreator_ReportErrorf(const char *fmt, ...)
     char message[512];
     vsnprintf(message, sizeof(message), fmt, args);
     va_end(args);
-
-    fprintf(stderr, "\x1b[31mERROR: %s\x1b[0m\n", message);
 
     const char *displayMessage = LayoutCreator_SanitizeErrorMessage(message);
     if (errorPopupData.count < sizeof(errorPopupData.popups) / sizeof(errorPopupData.popups[0]))
@@ -1208,6 +1209,7 @@ int convert()
     if (!FileExists(streamData.inputPath))
     {
         ERROR("Input file does not exist (\"%s\").", streamData.inputPath);
+        LayoutCreator_ReportErrorf("The selected input file does not exist.");
         return 1;
     }
 
@@ -1216,18 +1218,21 @@ int convert()
     if (outputPath[0] == '\0')
     {
         ERROR("Output file is missing.");
+        LayoutCreator_ReportErrorf("Please choose an output file path.");
         return 2;
     }
     const char *outputDir = GetDirectoryPath(outputPath);
     if (!DirectoryExists(outputDir))
     {
         ERROR("Output directory does not exist (%s).", outputDir);
+        LayoutCreator_ReportErrorf("The selected output directory does not exist.");
         return 3;
     }
     const char *outputName = GetFileNameWithoutExt(outputPath);
     if (!IsFileNameValid(outputName))
     {
         ERROR("Output filename is invalid (%s).", outputName);
+        LayoutCreator_ReportErrorf("The output file name is invalid.");
         return 4;
     }
     char outputType = getDropdownValue(DROPDOWN_ID_OUTPUT_TYPE)[0];
@@ -1260,6 +1265,7 @@ int convert()
 
     default:
         ERROR("Invalid output type selected (%c).", outputType);
+        LayoutCreator_ReportErrorf("Unsupported output type selected.");
         return 5;
         break;
     }
@@ -1280,18 +1286,21 @@ int convert()
     if (fullOutputPath == NULL)
     {
         ERROR("Failed to allocate memory.");
+        LayoutCreator_ReportErrorf("Internal error: unable to prepare output path.");
         return 6;
     }
     ret = snprintf(fullOutputPath, fullOutputPathSize, "%s%c%s%s", outputDir, slash, outputName, outputExt);
     if (ret < 0 || ret >= fullOutputPathSize)
     {
         ERROR("Failed to write output into buffer.");
+        LayoutCreator_ReportErrorf("Internal error: unable to build the output file path.");
         free(fullOutputPath);
         return 7;
     }
     if (strcmp(streamData.inputPath, fullOutputPath) == 0)
     {
         ERROR("Input and output are the same.");
+        LayoutCreator_ReportErrorf("The input and output files cannot be the same.");
         free(fullOutputPath);
         return 8;
     }
@@ -1454,6 +1463,7 @@ void HandleLoadInputButtonInteraction(
         if (fp == NULL)
         {
             ERROR("Failed to execute command and establish pipe.");
+            LayoutCreator_ReportErrorf("Unable to probe the selected input file.");
             return;
         }
 
@@ -1463,11 +1473,13 @@ void HandleLoadInputButtonInteraction(
         if (jsonText == NULL)
         {
             ERROR("Failed to read ffprobe output.");
+            LayoutCreator_ReportErrorf("Unable to read metadata from the input file.");
             return;
         }
         if (pcloseRet != 0)
         {
             ERROR("ffprobe exited with non-zero status (%d).", pcloseRet);
+            LayoutCreator_ReportErrorf("Unable to read metadata from the input file.");
         }
 
         cJSON *json = cJSON_ParseWithLength(jsonText, jsonSize);
@@ -1475,6 +1487,7 @@ void HandleLoadInputButtonInteraction(
         if (json == NULL)
         {
             ERROR("Failed to parse output as JSON.");
+            LayoutCreator_ReportErrorf("An unexpected error occurred while reading input metadata.");
             const char *errorPtr = cJSON_GetErrorPtr();
             if (errorPtr != NULL)
             {
@@ -1490,12 +1503,22 @@ void HandleLoadInputButtonInteraction(
         if (streams == NULL)
         {
             ERROR("Failed to get streams object from JSON.");
+            LayoutCreator_ReportErrorf("An unexpected error occurred while reading input metadata.");
             cJSON_Delete(json);
             return;
         }
 
+        if (streamData.convertProcess.valid)
+        {
+            childKill(&streamData.convertProcess);
+        }
+        if (previewImageData.imageTexture.id != 0)
+        {
+            UnloadTexture(previewImageData.imageTexture);
+            previewImageData.imageTexture.id = 0;
+        }
+
         memset(&streamData, 0, sizeof(streamData));
-        memset(&previewImageData.imageTexture, 0, sizeof(Texture2D));
 
         cJSON *stream;
         size_t i = 0;
@@ -1524,13 +1547,14 @@ void HandleLoadInputButtonInteraction(
             else
             {
                 ERROR("Failed to read streams[%zu]", i);
+                LayoutCreator_ReportErrorf("An unexpected error occurred while reading input metadata.");
             }
 
             i++;
         }
         LOG("v: %zu, a: %zu, s: %zu", streamData.streamCounts[STREAM_ID_VIDEO], streamData.streamCounts[STREAM_ID_AUDIO], streamData.streamCounts[STREAM_ID_SUBTITLES]);
 
-        memcpy(streamData.inputPath, trim(getTextboxValue(TEXTBOX_ID_INPUT_PATH)), TEXTBOX_BUFFER_SIZE);
+        snprintf(streamData.inputPath, sizeof(streamData.inputPath), "%s", trim(getTextboxValue(TEXTBOX_ID_INPUT_PATH)));
         cJSON_Delete(json);
         dropdownData.isInit[DROPDOWN_ID_OUTPUT_TYPE] = false;
     }
@@ -1564,6 +1588,7 @@ void HandleLoadPreviewButtonInteraction(
         if (fp == NULL)
         {
             ERROR("Failed to execute command and establish pipe.");
+            LayoutCreator_ReportErrorf("Unable to probe preview image dimensions.");
             return;
         }
 
@@ -1574,6 +1599,7 @@ void HandleLoadPreviewButtonInteraction(
         if (ret != 2)
         {
             ERROR("Failed to read command output.");
+            LayoutCreator_ReportErrorf("Unable to read preview metadata from the input file.");
             return;
         }
 
@@ -1596,6 +1622,7 @@ void HandleLoadPreviewButtonInteraction(
         if (scaleWidth == -1 && scaleHeight == -1)
         {
             ERROR("Both scale dimensions are -1.");
+            LayoutCreator_ReportErrorf("Please enter at least one valid preview scale dimension.");
             return;
         }
         if (scaleWidth == -1)
@@ -1644,6 +1671,7 @@ void HandleLoadPreviewButtonInteraction(
         if (ret)
         {
             ERROR("Failed to create child process (%d)", ret);
+            LayoutCreator_ReportErrorf("Unable to generate preview image.");
             return;
         }
 
@@ -1652,6 +1680,7 @@ void HandleLoadPreviewButtonInteraction(
         {
             ERROR("Invalid preview dimensions (%d x %d)", scaleWidth, scaleHeight);
             childReset(&imageProcess);
+            LayoutCreator_ReportErrorf("Invalid preview dimensions.");
             return;
         }
 
@@ -1660,6 +1689,7 @@ void HandleLoadPreviewButtonInteraction(
         {
             ERROR("Preview dimensions too large (%d x %d)", scaleWidth, scaleHeight);
             childReset(&imageProcess);
+            LayoutCreator_ReportErrorf("Preview size is too large.");
             return;
         }
 
@@ -1673,11 +1703,13 @@ void HandleLoadPreviewButtonInteraction(
         if (imageBuffer == NULL)
         {
             ERROR("NULL imageBuffer");
+            LayoutCreator_ReportErrorf("Unable to allocate memory for preview image.");
             return;
         }
         if (totalBytesRead != imageBufferSize)
         {
             ERROR("Total bytes read (%zu) less than image buffer size (%zu)", totalBytesRead, imageBufferSize);
+            LayoutCreator_ReportErrorf("Unable to read the full preview image data.");
             LOG("%s", imageBuffer);
             free(imageBuffer);
             return;
@@ -1696,6 +1728,7 @@ void HandleLoadPreviewButtonInteraction(
         if (newTexture.id == 0)
         {
             ERROR("Failed to load texture from image.");
+            LayoutCreator_ReportErrorf("Unable to create preview texture.");
             UnloadImage(image);
             return;
         }
@@ -1793,6 +1826,7 @@ void HandleBrowseButtonInteraction(
 
             default:
                 ERROR("Invalid output type selected (%c)", outputType);
+                LayoutCreator_ReportErrorf("Unable to open save dialog for the selected output type.");
                 return;
                 break;
             }
@@ -1827,6 +1861,7 @@ void HandleBrowseButtonInteraction(
         else
         {
             ERROR("%s", NFD_GetError());
+            LayoutCreator_ReportErrorf("A file dialog error occurred. Please try again.");
         }
     }
 }
@@ -1842,6 +1877,7 @@ void HandleConvertButtonInteraction(
         if (ret)
         {
             ERROR("Convert failed (%d)", ret);
+            LayoutCreator_ReportErrorf("Conversion failed. See console for details.");
         }
     }
 }
@@ -1857,6 +1893,7 @@ void HandleConvertCancelButtonInteraction(
         if (ret)
         {
             ERROR("Convert cancel failed");
+            LayoutCreator_ReportErrorf("Unable to cancel conversion.");
         }
     }
 }
@@ -3589,13 +3626,14 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         if (ret >= 0 && ret < sizeof(temp))
         {
             TextboxBuffer *buffer = &textboxData.textboxBuffers[TEXTBOX_ID_INPUT_PATH];
-            memcpy(buffer->chars, temp, TEXTBOX_BUFFER_SIZE);
-            buffer->length = ret;
-            buffer->cursorPosition = ret;
+            snprintf(buffer->chars, sizeof(buffer->chars), "%s", temp);
+            buffer->length = strlen(buffer->chars);
+            buffer->cursorPosition = buffer->length;
         }
         else
         {
             ERROR("Input file path is too long.");
+            LayoutCreator_ReportErrorf("The dropped file path is too long to use.");
         }
 
         UnloadDroppedFiles(pathList);
@@ -3753,6 +3791,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             }
             buffer->cursorPosition -= offset;
             buffer->length -= offset;
+            buffer->chars[buffer->length] = '\0';
             textboxData.focusData.focusStartTime = GetTime();
 
             if (buffer->numberboxConfig.isNumberbox)
@@ -3804,6 +3843,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 buffer->chars[i] = buffer->chars[i + offset];
             }
             buffer->length -= offset;
+            buffer->chars[buffer->length] = '\0';
             textboxData.focusData.focusStartTime = GetTime();
 
             if (buffer->numberboxConfig.isNumberbox)
