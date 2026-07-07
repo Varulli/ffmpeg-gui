@@ -1,4 +1,5 @@
 #include "clay.h"
+#include "layout_model.h"
 #include "raylib.h"
 #include "nfd.h"
 #include "cJSON.h"
@@ -1293,233 +1294,145 @@ static int ValidateSubtitleFile(const char *subtitlePath)
     return 0;
 }
 
+static void copyGuiStateToModel(LayoutModel *model)
+{
+    LayoutModel_Init(model);
+
+    for (size_t i = 0; i < TEXTBOX_ID_DUMMY_LAST; i++)
+    {
+        LayoutTextboxBuffer *dst = &model->textboxData.textboxBuffers[i];
+        TextboxBuffer *src = &textboxData.textboxBuffers[i];
+        memcpy(dst->chars, src->chars, sizeof(dst->chars));
+        dst->charsDefault = src->charsDefault;
+        dst->length = src->length;
+        dst->cursorPosition = src->cursorPosition;
+        dst->numberboxConfig = (LayoutNumberboxConfig){
+            .isNumberbox = src->numberboxConfig.isNumberbox,
+            .isInt = src->numberboxConfig.isInt,
+            .min = src->numberboxConfig.min,
+            .max = src->numberboxConfig.max,
+        };
+        model->textboxData.isInit[i] = textboxData.isInit[i];
+    }
+
+    model->textboxData.hoveredTextbox = textboxData.hoveredTextbox;
+    model->textboxData.focusData.focusRegistered = textboxData.focusData.focusRegistered;
+    model->textboxData.focusData.focusIndex = textboxData.focusData.focusIndex;
+    model->textboxData.focusData.focusStartTime = textboxData.focusData.focusStartTime;
+
+    for (size_t i = 0; i < DROPDOWN_ID_DUMMY_LAST; i++)
+    {
+        model->dropdownData.selectedOptions[i] = dropdownData.selectedOptions[i];
+        model->dropdownData.selectedValues[i] = dropdownData.selectedValues[i];
+        model->dropdownData.isInit[i] = dropdownData.isInit[i];
+    }
+    model->dropdownData.hoveredOption = dropdownData.hoveredOption;
+    model->dropdownData.hoveredValue = dropdownData.hoveredValue;
+
+    model->tabData.selectedTab = tabData.selectedTab;
+    for (size_t i = 0; i < TAB_ID_DUMMY_LAST; i++)
+    {
+        model->tabData.isDisabled[i] = tabData.isDisabled[i];
+    }
+
+    memcpy(model->streamData.inputPath, streamData.inputPath, sizeof(model->streamData.inputPath));
+    for (size_t i = 0; i < STREAM_ID_DUMMY_LAST; i++)
+    {
+        model->streamData.streamCounts[i] = streamData.streamCounts[i];
+    }
+    memcpy(model->streamData.convertOutput, streamData.convertOutput, sizeof(model->streamData.convertOutput));
+    model->streamData.convertOutputLength = streamData.convertOutputLength;
+
+    model->previewImageData.imageSize = previewImageData.imageSize;
+    model->previewImageData.imageSizeMin = previewImageData.imageSizeMin;
+    model->previewImageData.imageSizeMax = previewImageData.imageSizeMax;
+
+    model->errorPopupData.count = errorPopupData.count;
+    for (size_t i = 0; i < errorPopupData.count; i++)
+    {
+        memcpy(model->errorPopupData.popups[i].message, errorPopupData.popups[i].message, sizeof(model->errorPopupData.popups[i].message));
+        model->errorPopupData.popups[i].createdAt = errorPopupData.popups[i].createdAt;
+    }
+}
+
+static void copyModelTextboxesToGui(const LayoutModel *model)
+{
+    for (size_t i = 0; i < TEXTBOX_ID_DUMMY_LAST; i++)
+    {
+        const LayoutTextboxBuffer *src = &model->textboxData.textboxBuffers[i];
+        TextboxBuffer *dst = &textboxData.textboxBuffers[i];
+        memcpy(dst->chars, src->chars, sizeof(dst->chars));
+        dst->charsDefault = src->charsDefault;
+        dst->length = src->length;
+        dst->cursorPosition = src->cursorPosition;
+        dst->numberboxConfig = (NumberboxConfig){
+            .isNumberbox = src->numberboxConfig.isNumberbox,
+            .isInt = src->numberboxConfig.isInt,
+            .min = src->numberboxConfig.min,
+            .max = src->numberboxConfig.max,
+        };
+        textboxData.isInit[i] = model->textboxData.isInit[i];
+    }
+    textboxData.focusData.focusRegistered = model->textboxData.focusData.focusRegistered;
+    textboxData.focusData.focusIndex = model->textboxData.focusData.focusIndex;
+    textboxData.focusData.focusStartTime = model->textboxData.focusData.focusStartTime;
+}
+
+static bool convertFileExists(const char *path, void *userData)
+{
+    (void)userData;
+    return FileExists(path);
+}
+
+static bool convertDirectoryExists(const char *path, void *userData)
+{
+    (void)userData;
+    return DirectoryExists(path);
+}
+
+static bool convertIsFileNameValid(const char *name, void *userData)
+{
+    (void)userData;
+    return IsFileNameValid(name);
+}
+
+static int convertValidateSubtitleFile(const char *path, void *userData)
+{
+    (void)userData;
+    return ValidateSubtitleFile(path);
+}
+
 int convert()
 {
-    char buffer[4096];
-    int ret;
-
     streamData.convertOutputLength = 0;
     streamData.convertOutput[0] = '\0';
 
-    // Validate input path
-    if (!FileExists(streamData.inputPath))
+    LayoutModel model;
+    ConvertPlan plan;
+    char error[256];
+    GuiPlatform platform = {
+        .fileExists = convertFileExists,
+        .directoryExists = convertDirectoryExists,
+        .isFileNameValid = convertIsFileNameValid,
+        .validateSubtitleFile = convertValidateSubtitleFile,
+        .userData = NULL,
+    };
+    copyGuiStateToModel(&model);
+
+    int ret = LayoutModel_BuildConvertPlan(&model, &platform, &plan, error, sizeof(error));
+    if (ret)
     {
-        ERROR("Input file does not exist (\"%s\").", streamData.inputPath);
-        reportErrorf("The selected input file does not exist.");
-        return 1;
+        ERROR("Convert validation failed: %s", error);
+        reportErrorf("%s", error);
+        return ret;
     }
 
-    // Validate output path
-    const char *outputPath = trim(getTextboxValue(TEXTBOX_ID_OUTPUT_PATH));
-    if (outputPath[0] == '\0')
-    {
-        ERROR("Output file is missing.");
-        reportErrorf("Please choose an output file path.");
-        return 2;
-    }
-    const char *outputDir = GetDirectoryPath(outputPath);
-    if (!DirectoryExists(outputDir))
-    {
-        ERROR("Output directory does not exist (%s).", outputDir);
-        reportErrorf("The selected output directory does not exist.");
-        return 3;
-    }
-    const char *outputName = GetFileNameWithoutExt(outputPath);
-    if (!IsFileNameValid(outputName))
-    {
-        ERROR("Output filename is invalid (%s).", outputName);
-        reportErrorf("The output file name is invalid.");
-        return 4;
-    }
-    char outputType = getDropdownValue(DROPDOWN_ID_OUTPUT_TYPE)[0];
-    const char *outputExt = GetFileExtension(outputPath);
-    switch (outputType)
-    {
-    case 'v':
-        if (outputExt == NULL || (!extensionEqualsIgnoreCase(outputExt, ".gif") && !extensionEqualsIgnoreCase(outputExt, ".mkv") && !extensionEqualsIgnoreCase(outputExt, ".mov") && !extensionEqualsIgnoreCase(outputExt, ".mp4") && !extensionEqualsIgnoreCase(outputExt, ".webm")))
-        {
-            LOG("VIDEO - changing ext (%s -> %s)", outputExt, defaultExtVideo);
-            outputExt = defaultExtVideo;
-        }
-        break;
-
-    case 'a':
-        if (outputExt == NULL || (!extensionEqualsIgnoreCase(outputExt, ".wav") && !extensionEqualsIgnoreCase(outputExt, ".wave") && !extensionEqualsIgnoreCase(outputExt, ".mp3") && !extensionEqualsIgnoreCase(outputExt, ".m4a") && !extensionEqualsIgnoreCase(outputExt, ".flac") && !extensionEqualsIgnoreCase(outputExt, ".ogg") && !extensionEqualsIgnoreCase(outputExt, ".oga") && !extensionEqualsIgnoreCase(outputExt, ".opus")))
-        {
-            LOG("AUDIO - changing ext (%s -> %s)", outputExt, defaultExtAudio);
-            outputExt = defaultExtAudio;
-        }
-        break;
-
-    case 'i':
-        if (outputExt == NULL || (!extensionEqualsIgnoreCase(outputExt, ".jpg") && !extensionEqualsIgnoreCase(outputExt, ".jpeg") && !extensionEqualsIgnoreCase(outputExt, ".jpe") && !extensionEqualsIgnoreCase(outputExt, ".jfif") && !extensionEqualsIgnoreCase(outputExt, ".png") && !extensionEqualsIgnoreCase(outputExt, ".tiff") && !extensionEqualsIgnoreCase(outputExt, ".tif") && !extensionEqualsIgnoreCase(outputExt, ".webp")))
-        {
-            LOG("IMAGE - changing ext (%s -> %s)", outputExt, defaultExtImage);
-            outputExt = defaultExtImage;
-        }
-        break;
-
-    default:
-        ERROR("Invalid output type selected (%c).", outputType);
-        reportErrorf("Unsupported output type selected.");
-        return 5;
-        break;
-    }
-
-    char slash = '/';
-#ifdef _WIN32
-    const char *slashPtr = strchr(outputDir, '\\');
-    if (slashPtr != NULL)
-    {
-        slash = '\\';
-    }
-#endif
-
-    // LOG("dir: %s\nname: %s\next: %s", outputDir, outputName, outputExt);
-
-    size_t fullOutputPathSize = strlen(outputDir) + strlen(outputName) + strlen(outputExt) + 2;
-    char *fullOutputPath = malloc(fullOutputPathSize);
-    if (fullOutputPath == NULL)
-    {
-        ERROR("Failed to allocate memory.");
-        reportErrorf("Internal error: unable to prepare output path.");
-        return 6;
-    }
-    ret = snprintf(fullOutputPath, fullOutputPathSize, "%s%c%s%s", outputDir, slash, outputName, outputExt);
-    if (ret < 0 || ret >= fullOutputPathSize)
-    {
-        ERROR("Failed to write output into buffer.");
-        reportErrorf("Internal error: unable to build the output file path.");
-        free(fullOutputPath);
-        return 7;
-    }
-    if (strcmp(streamData.inputPath, fullOutputPath) == 0)
-    {
-        ERROR("Input and output are the same.");
-        reportErrorf("The input and output files cannot be the same.");
-        free(fullOutputPath);
-        return 8;
-    }
-    free(fullOutputPath);
-
-    bool outputVideo = outputType == 'v';
-    bool gifInput = extensionEqualsIgnoreCase(GetFileExtension(streamData.inputPath), ".gif");
-    bool outputAudio = (outputType == 'a' || (outputVideo && !extensionEqualsIgnoreCase(outputExt, ".gif"))) && streamData.streamCounts[STREAM_ID_AUDIO] > 0;
-    bool outputImage = outputType == 'i';
-    bool burnSubtitles = getDropdownValue(DROPDOWN_ID_SUBTITLES)[0] != '\0';
-
-    if (burnSubtitles)
-    {
-        const char *subtitlePath = trim(getTextboxValue(TEXTBOX_ID_SUBTITLES_SOURCE));
-        ret = ValidateSubtitleFile(subtitlePath);
-        if (ret != 0)
-        {
-            return ret;
-        }
-    }
-
-    StringBuilder sb;
-    sbInit(&sb);
-    if (outputVideo)
-    {
-        sbAppendf(
-            &sb,
-            "[0:v]fps=%s,trim=%s:%s,setpts=(PTS-STARTPTS)/%s,crop=%s:%s:%s:%s,scale=%s:%s%s%s%s%s[out_v];",
-            getTextboxValue(TEXTBOX_ID_FPS),
-            getTextboxValue(TEXTBOX_ID_DURATION_START_VIDEO),
-            getTextboxValue(TEXTBOX_ID_DURATION_END_VIDEO)[0] == 'e' ? "" : getTextboxValue(TEXTBOX_ID_DURATION_END_VIDEO),
-            getTextboxValue(TEXTBOX_ID_SPEED_VIDEO),
-            getTextboxValue(TEXTBOX_ID_CROP_W),
-            getTextboxValue(TEXTBOX_ID_CROP_H),
-            getTextboxValue(TEXTBOX_ID_CROP_X),
-            getTextboxValue(TEXTBOX_ID_CROP_Y),
-            getTextboxValue(TEXTBOX_ID_SCALE_W),
-            getTextboxValue(TEXTBOX_ID_SCALE_H),
-            !burnSubtitles ? "" : ",subtitles='",
-            !burnSubtitles ? "" : trim(getTextboxValue(TEXTBOX_ID_SUBTITLES_SOURCE)),
-            !burnSubtitles ? "" : "'",
-            !gifInput ? "" : ",format=yuv420p");
-    }
-    if (outputAudio)
-    {
-        bool channelLayout = getDropdownValue(DROPDOWN_ID_CHANNEL_LAYOUT)[0] != '\0';
-        sbAppendf(
-            &sb,
-            "[0:a]atrim=%s:%s,",
-            getTextboxValue(TEXTBOX_ID_DURATION_START_AUDIO),
-            getTextboxValue(TEXTBOX_ID_DURATION_END_AUDIO)[0] == 'e' ? "" : getTextboxValue(TEXTBOX_ID_DURATION_END_AUDIO));
-
-        float multiplier = atof(getTextboxValue(TEXTBOX_ID_SPEED_AUDIO));
-        while (multiplier < 0.5)
-        {
-            sbAppend(&sb, "atempo=0.5,");
-            multiplier *= 2;
-        }
-        sbAppendf(&sb, "atempo=%f,", multiplier);
-
-        sbAppendf(
-            &sb,
-            "adelay=%s:1%s,aformat=%s%s[out_a]",
-            getTextboxValue(TEXTBOX_ID_DELAY),
-            getDropdownValue(DROPDOWN_ID_LOUDNORM_ENABLE)[0] == '\0' ? "" : ",loudnorm",
-            !channelLayout ? "" : "channel_layouts=",
-            !channelLayout ? "" : getDropdownValue(DROPDOWN_ID_CHANNEL_LAYOUT));
-    }
-    if (outputImage)
-    {
-        sbAppendf(
-            &sb,
-            "[0:v]crop=%s:%s:%s:%s,scale=%s:%s[out_v]",
-            getTextboxValue(TEXTBOX_ID_CROP_W),
-            getTextboxValue(TEXTBOX_ID_CROP_H),
-            getTextboxValue(TEXTBOX_ID_CROP_X),
-            getTextboxValue(TEXTBOX_ID_CROP_Y),
-            getTextboxValue(TEXTBOX_ID_SCALE_W),
-            getTextboxValue(TEXTBOX_ID_SCALE_H));
-    }
-
-    ArgvBuilder a;
-    argvInit(&a);
-    argvPush(&a, strdup("ffmpeg"));
-    argvPush(&a, strdup("-v"));
-    argvPush(&a, strdup("error"));
-    argvPush(&a, strdup("-progress"));
-    argvPush(&a, strdup("pipe:1"));
-    argvPush(&a, strdup("-y"));
-    argvPush(&a, strdup("-i"));
-    argvPush(&a, strdup(streamData.inputPath));
-    argvPush(&a, strdup("-filter_complex"));
-    argvPush(&a, sb.buffer);
-    if (outputVideo || outputImage)
-    {
-        argvPush(&a, strdup("-map"));
-        argvPush(&a, strdup("[out_v]"));
-    }
-    if (outputVideo && !gifInput)
-    {
-        argvPush(&a, strdup("-c:v"));
-        argvPush(&a, strdup("libx264"));
-        argvPush(&a, strdup("-movflags"));
-        argvPush(&a, strdup("+faststart"));
-    }
-    if (outputAudio)
-    {
-        argvPush(&a, strdup("-map"));
-        argvPush(&a, strdup("[out_a]"));
-    }
-    if (outputImage)
-    {
-        argvPush(&a, strdup("-vframes"));
-        argvPush(&a, strdup("1"));
-    }
-    argvPush(&a, argprintf("%s%c%s%s", outputDir, slash, outputName, outputExt));
-
-    char *cmdline = buildCmdline(a.v);
+    char *cmdline = buildCmdline(plan.argv);
     LOG("cmd = \"%s\"", cmdline);
     free(cmdline);
 
-    ret = childCreate(&streamData.convertProcess, a.v);
-    argvFree(&a);
+    ret = childCreate(&streamData.convertProcess, plan.argv);
+    LayoutModel_FreeConvertPlan(&plan);
     if (ret)
     {
         ERROR("Failed to create child process (%d)", ret);
@@ -1588,29 +1501,15 @@ void HandleLoadInputButtonInteraction(
             reportErrorf("Unable to read metadata from the input file.");
         }
 
-        cJSON *json = cJSON_ParseWithLength(jsonText, jsonSize);
+        LayoutModel model;
+        char parseError[256];
+        copyGuiStateToModel(&model);
+        int parseRet = LayoutModel_ParseStreamsJson(&model, jsonText, jsonSize, parseError, sizeof(parseError));
         free(jsonText);
-        if (json == NULL)
+        if (parseRet != 0)
         {
-            ERROR("Failed to parse output as JSON.");
+            ERROR("Failed to parse input metadata: %s", parseError);
             reportErrorf("An unexpected error occurred while reading input metadata.");
-            const char *errorPtr = cJSON_GetErrorPtr();
-            if (errorPtr != NULL)
-            {
-                ERROR("Error before: %s", errorPtr);
-            }
-            return;
-        }
-
-        // cJSON_PrintPreallocated(json, buffer, sizeof(buffer) - 5, cJSON_True);
-        // LOG("JSON:\n%s", buffer);
-
-        cJSON *streams = cJSON_GetObjectItemCaseSensitive(json, "streams");
-        if (streams == NULL)
-        {
-            ERROR("Failed to get streams object from JSON.");
-            reportErrorf("An unexpected error occurred while reading input metadata.");
-            cJSON_Delete(json);
             return;
         }
 
@@ -1625,43 +1524,13 @@ void HandleLoadInputButtonInteraction(
         }
 
         memset(&streamData, 0, sizeof(streamData));
-
-        cJSON *stream;
-        size_t i = 0;
-        cJSON_ArrayForEach(stream, streams)
+        for (size_t i = 0; i < STREAM_ID_DUMMY_LAST; i++)
         {
-            cJSON *codecType = cJSON_GetObjectItemCaseSensitive(stream, "codec_type");
-            if (cJSON_IsString(codecType) && codecType->valuestring != NULL)
-            {
-                // LOG("codec_type = %s", codecType->valuestring);
-                if (strcmp(codecType->valuestring, "video") == 0)
-                {
-                    // LOG("Detected stream %d as video", i);
-                    streamData.streamCounts[STREAM_ID_VIDEO]++;
-                }
-                else if (strcmp(codecType->valuestring, "audio") == 0)
-                {
-                    // LOG("Detected stream %d as audio", i);
-                    streamData.streamCounts[STREAM_ID_AUDIO]++;
-                }
-                else if (strcmp(codecType->valuestring, "subtitle") == 0)
-                {
-                    // LOG("Detected stream %d as subtitle", i);
-                    streamData.streamCounts[STREAM_ID_SUBTITLES]++;
-                }
-            }
-            else
-            {
-                ERROR("Failed to read streams[%zu]", i);
-                reportErrorf("An unexpected error occurred while reading input metadata.");
-            }
-
-            i++;
+            streamData.streamCounts[i] = model.streamData.streamCounts[i];
         }
         LOG("v: %zu, a: %zu, s: %zu", streamData.streamCounts[STREAM_ID_VIDEO], streamData.streamCounts[STREAM_ID_AUDIO], streamData.streamCounts[STREAM_ID_SUBTITLES]);
 
         snprintf(streamData.inputPath, sizeof(streamData.inputPath), "%s", trim(getTextboxValue(TEXTBOX_ID_INPUT_PATH)));
-        cJSON_Delete(json);
         dropdownData.isInit[DROPDOWN_ID_OUTPUT_TYPE] = false;
     }
 }
@@ -3765,306 +3634,31 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
         scrollData.scrolling = -1;
     }
 
-    TextboxBuffer *buffer;
-    if (textboxData.focusData.focusIndex >= 0)
+    LayoutModel model;
+    GuiInputFrame input = {0};
+    int key;
+    while (input.typedCharCount < LAYOUT_MAX_TYPED_CHARS && (key = GetCharPressed()))
     {
-        buffer = &textboxData.textboxBuffers[textboxData.focusData.focusIndex];
-
-        int key;
-        while ((key = GetCharPressed()))
-        {
-            int charCodeLowerBound = ' ';
-            int charCodeUpperBound = '~';
-            if (buffer->numberboxConfig.isNumberbox)
-            {
-                charCodeLowerBound = '0';
-                charCodeUpperBound = '9';
-            }
-
-            char *dotPosition = strchr(buffer->chars, '.');
-
-            bool keyWithinBounds = key >= charCodeLowerBound && key <= charCodeUpperBound;
-            bool validDecimalPoint = !buffer->numberboxConfig.isInt && key == '.' && dotPosition == NULL;
-
-            if ((keyWithinBounds || validDecimalPoint) && buffer->length < TEXTBOX_BUFFER_SIZE - 1)
-            {
-                size_t i = ++buffer->length;
-                for (i; i > buffer->cursorPosition; i--)
-                {
-                    buffer->chars[i] = buffer->chars[i - 1];
-                }
-                buffer->chars[buffer->cursorPosition] = key;
-                buffer->cursorPosition++;
-
-                if (buffer->numberboxConfig.isNumberbox)
-                {
-                    if (key == '.')
-                    {
-                        // Ensure valid float from decimal point input
-                        if (buffer->length == 1)
-                        {
-                            strcpy(buffer->chars, "0.");
-                            buffer->length = 2;
-                            buffer->cursorPosition = 2;
-                        }
-
-                        // Clamp value if decimal point changes it
-                        if (buffer->cursorPosition != buffer->length)
-                        {
-                            int charsWritten = clampFloatAsString(buffer->chars,
-                                                                  buffer->numberboxConfig.min,
-                                                                  buffer->numberboxConfig.max);
-                            buffer->length = charsWritten;
-                            buffer->cursorPosition = charsWritten;
-                        }
-                    }
-                    else if (key == '0')
-                    {
-                        // If leading/trailing zero, don't rewrite
-                        char *firstSigPosition;
-                        char *lastSigPosition;
-
-                        for (firstSigPosition = buffer->chars; firstSigPosition < dotPosition; firstSigPosition++)
-                        {
-                            if (*firstSigPosition != '0')
-                            {
-                                break;
-                            }
-                        }
-                        for (lastSigPosition = buffer->chars + buffer->length - 1; lastSigPosition > dotPosition; lastSigPosition--)
-                        {
-                            if (*lastSigPosition != '0')
-                            {
-                                break;
-                            }
-                        }
-
-                        bool leadingZero = buffer->cursorPosition - 1 <= firstSigPosition - buffer->chars;
-                        bool trailingZero = buffer->cursorPosition - 1 >= lastSigPosition - buffer->chars;
-
-                        if (!(leadingZero || trailingZero))
-                        {
-                            int charsWritten = clampFloatAsString(buffer->chars,
-                                                                  buffer->numberboxConfig.min,
-                                                                  buffer->numberboxConfig.max);
-                            buffer->length = charsWritten;
-                            buffer->cursorPosition = charsWritten;
-                        }
-                    }
-                    else
-                    {
-                        // Any number changes value, so clamp it
-                        int charsWritten = clampFloatAsString(buffer->chars,
-                                                              buffer->numberboxConfig.min,
-                                                              buffer->numberboxConfig.max);
-                        buffer->length = charsWritten;
-                        buffer->cursorPosition = charsWritten;
-                    }
-                }
-
-                textboxData.focusData.focusStartTime = GetTime();
-            }
-        }
-
-        bool nonZeroCursorPosition = buffer->cursorPosition > 0;
-        bool nonMaxCursorPosition = buffer->cursorPosition < buffer->length;
-
-        bool isCtrlDown = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
-        bool isShiftDown = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
-
-        // Handle BACKSPACE
-        if ((IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) && nonZeroCursorPosition)
-        {
-            int offset = 0;
-
-            if (isCtrlDown)
-            {
-                while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
-                       charMatchesAny(buffer->chars[buffer->cursorPosition - 1 - offset], " ./\\"))
-                {
-                    offset++;
-                }
-                while ((int)buffer->cursorPosition - 1 - offset >= 0 &&
-                       !charMatchesAny(buffer->chars[buffer->cursorPosition - 1 - offset], " ./\\"))
-                {
-                    offset++;
-                }
-            }
-            else
-            {
-                offset = 1;
-            }
-
-            for (size_t i = buffer->cursorPosition; i <= buffer->length; i++)
-            {
-                buffer->chars[i - offset] = buffer->chars[i];
-            }
-            buffer->cursorPosition -= offset;
-            buffer->length -= offset;
-            buffer->chars[buffer->length] = '\0';
-            textboxData.focusData.focusStartTime = GetTime();
-
-            if (buffer->numberboxConfig.isNumberbox)
-            {
-                // Ensure valid float after deletion
-                if (buffer->length == 1 && buffer->chars[0] == '.')
-                {
-                    strcpy(buffer->chars, "0.");
-                    buffer->length = 2;
-                    buffer->cursorPosition += 1;
-                }
-                else if (buffer->length > 1)
-                {
-                    int charsWritten = clampFloatAsString(buffer->chars, buffer->numberboxConfig.min, buffer->numberboxConfig.max);
-                    buffer->length = charsWritten;
-                    if (buffer->cursorPosition > buffer->length)
-                    {
-                        buffer->cursorPosition = charsWritten;
-                    }
-                }
-            }
-        }
-
-        // Handle DELETE
-        else if ((IsKeyPressed(KEY_DELETE) || IsKeyPressedRepeat(KEY_DELETE)) && nonMaxCursorPosition)
-        {
-            int offset = 0;
-
-            if (isCtrlDown)
-            {
-                while ((int)buffer->cursorPosition + offset < buffer->length &&
-                       charMatchesAny(buffer->chars[buffer->cursorPosition + offset], " ./\\"))
-                {
-                    offset++;
-                }
-                while ((int)buffer->cursorPosition + offset < buffer->length &&
-                       !charMatchesAny(buffer->chars[buffer->cursorPosition + offset], " ./\\"))
-                {
-                    offset++;
-                }
-            }
-            else
-            {
-                offset = 1;
-            }
-
-            for (size_t i = buffer->cursorPosition; i <= buffer->length - offset; i++)
-            {
-                buffer->chars[i] = buffer->chars[i + offset];
-            }
-            buffer->length -= offset;
-            buffer->chars[buffer->length] = '\0';
-            textboxData.focusData.focusStartTime = GetTime();
-
-            if (buffer->numberboxConfig.isNumberbox)
-            {
-                // Ensure valid float after deletion
-                if (buffer->length == 1 && buffer->chars[0] == '.')
-                {
-                    strcpy(buffer->chars, "0.");
-                    buffer->length = 2;
-                    buffer->cursorPosition += 1;
-                }
-                else if (buffer->length > 1)
-                {
-                    int charsWritten = clampFloatAsString(buffer->chars, buffer->numberboxConfig.min, buffer->numberboxConfig.max);
-                    buffer->length = charsWritten;
-                    if (buffer->cursorPosition > buffer->length)
-                    {
-                        buffer->cursorPosition = charsWritten;
-                    }
-                }
-            }
-        }
-
-        // Handle LEFT
-        else if ((IsKeyPressed(KEY_LEFT) || IsKeyPressedRepeat(KEY_LEFT)) && nonZeroCursorPosition)
-        {
-            if (isCtrlDown)
-            {
-                while (buffer->cursorPosition > 0 &&
-                       charMatchesAny(buffer->chars[buffer->cursorPosition - 1], " ./\\"))
-                {
-                    buffer->cursorPosition--;
-                }
-                while (buffer->cursorPosition > 0 &&
-                       !charMatchesAny(buffer->chars[buffer->cursorPosition - 1], " ./\\"))
-                {
-                    buffer->cursorPosition--;
-                }
-            }
-            else
-            {
-                buffer->cursorPosition--;
-            }
-            textboxData.focusData.focusStartTime = GetTime();
-        }
-
-        // Handle RIGHT
-        else if ((IsKeyPressed(KEY_RIGHT) || IsKeyPressedRepeat(KEY_RIGHT)) && nonMaxCursorPosition)
-        {
-            if (isCtrlDown)
-            {
-                while (buffer->cursorPosition < buffer->length &&
-                       charMatchesAny(buffer->chars[buffer->cursorPosition], " ./\\"))
-                {
-                    buffer->cursorPosition++;
-                }
-                while (buffer->cursorPosition < buffer->length &&
-                       !charMatchesAny(buffer->chars[buffer->cursorPosition], " ./\\"))
-                {
-                    buffer->cursorPosition++;
-                }
-            }
-            else
-            {
-                buffer->cursorPosition++;
-            }
-            textboxData.focusData.focusStartTime = GetTime();
-        }
-
-        // Handle TAB while focused
-        else if (IsKeyPressed(KEY_TAB) || IsKeyPressedRepeat(KEY_TAB))
-        {
-            if (isShiftDown)
-            {
-                // do
-                // {
-                textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + TEXTBOX_ID_DUMMY_LAST - 1) % TEXTBOX_ID_DUMMY_LAST;
-                // } while (textboxData.isDisabled[textboxData.focusData.focusIndex]);
-            }
-            else
-            {
-                // do
-                // {
-                textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + 1) % TEXTBOX_ID_DUMMY_LAST;
-                // } while (textboxData.isDisabled[textboxData.focusData.focusIndex]);
-            }
-            buffer = &textboxData.textboxBuffers[textboxData.focusData.focusIndex];
-            buffer->cursorPosition = buffer->length;
-            textboxData.focusData.focusStartTime = GetTime();
-        }
+        input.typedChars[input.typedCharCount++] = key;
     }
-    else
-    {
-        // Handle TAB while unfocused
-        if (IsKeyPressed(KEY_TAB))
-        {
-            // do
-            // {
-            textboxData.focusData.focusIndex = (textboxData.focusData.focusIndex + 1) % TEXTBOX_ID_DUMMY_LAST;
-            // } while (textboxData.isDisabled[textboxData.focusData.focusIndex]);
-            buffer = &textboxData.textboxBuffers[textboxData.focusData.focusIndex];
-            buffer->cursorPosition = buffer->length;
-            textboxData.focusData.focusStartTime = GetTime();
-        }
-    }
+    input.keyPressed[LAYOUT_KEY_BACKSPACE] = IsKeyPressed(KEY_BACKSPACE);
+    input.keyRepeated[LAYOUT_KEY_BACKSPACE] = IsKeyPressedRepeat(KEY_BACKSPACE);
+    input.keyPressed[LAYOUT_KEY_DELETE] = IsKeyPressed(KEY_DELETE);
+    input.keyRepeated[LAYOUT_KEY_DELETE] = IsKeyPressedRepeat(KEY_DELETE);
+    input.keyPressed[LAYOUT_KEY_LEFT] = IsKeyPressed(KEY_LEFT);
+    input.keyRepeated[LAYOUT_KEY_LEFT] = IsKeyPressedRepeat(KEY_LEFT);
+    input.keyPressed[LAYOUT_KEY_RIGHT] = IsKeyPressed(KEY_RIGHT);
+    input.keyRepeated[LAYOUT_KEY_RIGHT] = IsKeyPressedRepeat(KEY_RIGHT);
+    input.keyPressed[LAYOUT_KEY_TAB] = IsKeyPressed(KEY_TAB);
+    input.keyRepeated[LAYOUT_KEY_TAB] = IsKeyPressedRepeat(KEY_TAB);
+    input.ctrlDown = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    input.shiftDown = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+    input.leftMouseReleased = IsMouseButtonReleased(MOUSE_BUTTON_LEFT);
+    input.now = GetTime();
 
-    // Unfocus on empty left-click
-    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && !textboxData.focusData.focusRegistered)
-    {
-        textboxData.focusData.focusIndex = -1;
-    }
+    copyGuiStateToModel(&model);
+    LayoutModel_ApplyTextboxInput(&model, &input);
+    copyModelTextboxesToGui(&model);
 
     SetMouseCursor(IsMouseButtonDown(MOUSE_BUTTON_MIDDLE) ? MOUSE_CURSOR_RESIZE_ALL : textboxData.hoveredTextbox >= 0 ? MOUSE_CURSOR_IBEAM
                                                                                                                       : MOUSE_CURSOR_DEFAULT);
