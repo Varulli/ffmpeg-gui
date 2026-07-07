@@ -43,10 +43,20 @@ FetchContent_MakeAvailable(raylib nfd cjson)
 
 file(GLOB SOURCES "src/${PROJECT_NAME}.c")
 
+add_library(layout_model STATIC src/layout_model.c)
+target_include_directories(layout_model
+                           PUBLIC ${CMAKE_SOURCE_DIR}/src
+                           PRIVATE ${cjson_SOURCE_DIR}
+                           )
+target_link_libraries(layout_model
+                      PUBLIC cjson
+                      )
+
 add_executable(${PROJECT_NAME} ${SOURCES})
 
 target_include_directories(${PROJECT_NAME}
                            PRIVATE ${cjson_SOURCE_DIR}
+                           PRIVATE ${CMAKE_SOURCE_DIR}/src
                            PRIVATE ${CMAKE_SOURCE_DIR}/inc
                            )
 
@@ -54,6 +64,7 @@ target_link_libraries(${PROJECT_NAME}
                       PRIVATE raylib
                       PRIVATE nfd
                       PRIVATE cjson
+                      PRIVATE layout_model
                       )
 
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
@@ -61,3 +72,14 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
                        ${CMAKE_SOURCE_DIR}/resources
                        $<TARGET_FILE_DIR:${PROJECT_NAME}>/resources
                    )
+
+enable_testing()
+
+add_executable(layout_model_tests tests/test_layout_model.c)
+target_include_directories(layout_model_tests
+                           PRIVATE ${CMAKE_SOURCE_DIR}/src
+                           )
+target_link_libraries(layout_model_tests
+                      PRIVATE layout_model
+                      )
+add_test(NAME layout_model_tests COMMAND layout_model_tests)
