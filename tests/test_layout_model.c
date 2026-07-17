@@ -81,7 +81,7 @@ static void set_defaults(LayoutModel *model)
 static bool file_exists(const char *path, void *userData)
 {
     (void)userData;
-    return strcmp(path, "/in.mp4") == 0 || strcmp(path, "/in.gif") == 0 || strcmp(path, "/subs.srt") == 0;
+    return strcmp(path, "/in.mp4") == 0 || strcmp(path, "/in.gif") == 0 || strcmp(path, "/tmp/same.mp4") == 0 || strcmp(path, "/subs.srt") == 0;
 }
 
 static bool dir_exists(const char *path, void *userData)
@@ -149,6 +149,67 @@ static void test_textbox_insert_delete_and_words(void)
     input.now = 4.0;
     LayoutModel_ApplyTextboxInput(&model, &input);
     EXPECT_STREQ("one/two ", model.textboxData.textboxBuffers[LAYOUT_TEXTBOX_ID_INPUT_PATH].chars);
+}
+
+static void test_textbox_boundary_keys_are_noops(void)
+{
+    LayoutModel model;
+    LayoutModel_Init(&model);
+    set_textbox(&model, LAYOUT_TEXTBOX_ID_INPUT_PATH, "abc");
+    model.textboxData.focusData.focusIndex = LAYOUT_TEXTBOX_ID_INPUT_PATH;
+    model.textboxData.focusData.focusStartTime = 10.0;
+    LayoutTextboxBuffer *buffer = &model.textboxData.textboxBuffers[LAYOUT_TEXTBOX_ID_INPUT_PATH];
+
+    GuiInputFrame input = {0};
+    buffer->cursorPosition = 0;
+    input.keyPressed[LAYOUT_KEY_BACKSPACE] = true;
+    input.now = 11.0;
+    LayoutModel_ApplyTextboxInput(&model, &input);
+    EXPECT_STREQ("abc", buffer->chars);
+    EXPECT_EQ_SIZE(0, buffer->cursorPosition);
+    EXPECT_EQ_INT(10, (int)model.textboxData.focusData.focusStartTime);
+
+    memset(&input, 0, sizeof(input));
+    input.keyPressed[LAYOUT_KEY_LEFT] = true;
+    input.now = 12.0;
+    LayoutModel_ApplyTextboxInput(&model, &input);
+    EXPECT_EQ_SIZE(0, buffer->cursorPosition);
+
+    memset(&input, 0, sizeof(input));
+    buffer->cursorPosition = buffer->length;
+    input.keyPressed[LAYOUT_KEY_DELETE] = true;
+    input.now = 13.0;
+    LayoutModel_ApplyTextboxInput(&model, &input);
+    EXPECT_STREQ("abc", buffer->chars);
+    EXPECT_EQ_SIZE(3, buffer->cursorPosition);
+    EXPECT_EQ_INT(10, (int)model.textboxData.focusData.focusStartTime);
+
+    memset(&input, 0, sizeof(input));
+    input.keyPressed[LAYOUT_KEY_RIGHT] = true;
+    input.now = 14.0;
+    LayoutModel_ApplyTextboxInput(&model, &input);
+    EXPECT_EQ_SIZE(3, buffer->cursorPosition);
+
+    memset(&input, 0, sizeof(input));
+    buffer->cursorPosition = 1;
+    input.typedChars[0] = 'Z';
+    input.typedCharCount = 1;
+    input.now = 15.0;
+    LayoutModel_ApplyTextboxInput(&model, &input);
+    EXPECT_STREQ("aZbc", buffer->chars);
+    EXPECT_EQ_SIZE(2, buffer->cursorPosition);
+
+    memset(&input, 0, sizeof(input));
+    model.textboxData.focusData.focusRegistered = false;
+    input.leftMouseReleased = true;
+    input.now = 16.0;
+    LayoutModel_ApplyTextboxInput(&model, &input);
+    EXPECT_EQ_INT(-1, model.textboxData.focusData.focusIndex);
+
+    model.textboxData.focusData.focusIndex = LAYOUT_TEXTBOX_ID_INPUT_PATH;
+    model.textboxData.focusData.focusRegistered = true;
+    LayoutModel_ApplyTextboxInput(&model, &input);
+    EXPECT_EQ_INT(LAYOUT_TEXTBOX_ID_INPUT_PATH, model.textboxData.focusData.focusIndex);
 }
 
 static void test_numberbox_clamps_and_decimal(void)
@@ -263,7 +324,33 @@ static void test_convert_plan_errors_and_image(void)
     EXPECT_STREQ("The selected input file does not exist.", error);
 
     snprintf(model.streamData.inputPath, sizeof(model.streamData.inputPath), "%s", "/in.mp4");
+    set_textbox(&model, LAYOUT_TEXTBOX_ID_OUTPUT_PATH, "");
+    EXPECT_TRUE(LayoutModel_BuildConvertPlan(&model, &platform, &plan, error, sizeof(error)) != 0);
+    EXPECT_STREQ("Please choose an output file path.", error);
+
+    set_textbox(&model, LAYOUT_TEXTBOX_ID_OUTPUT_PATH, "/missing/frame.png");
+    EXPECT_TRUE(LayoutModel_BuildConvertPlan(&model, &platform, &plan, error, sizeof(error)) != 0);
+    EXPECT_STREQ("The selected output directory does not exist.", error);
+
+    set_textbox(&model, LAYOUT_TEXTBOX_ID_OUTPUT_PATH, "/tmp/bad?.png");
+    EXPECT_TRUE(LayoutModel_BuildConvertPlan(&model, &platform, &plan, error, sizeof(error)) != 0);
+    EXPECT_STREQ("The output file name is invalid.", error);
+
+    model.dropdownData.selectedValues[LAYOUT_DROPDOWN_ID_OUTPUT_TYPE] = "";
+    set_textbox(&model, LAYOUT_TEXTBOX_ID_OUTPUT_PATH, "/tmp/frame.png");
+    EXPECT_TRUE(LayoutModel_BuildConvertPlan(&model, &platform, &plan, error, sizeof(error)) != 0);
+    EXPECT_STREQ("Unsupported output type selected.", error);
+
+    model.dropdownData.selectedValues[LAYOUT_DROPDOWN_ID_OUTPUT_TYPE] = "v";
+    snprintf(model.streamData.inputPath, sizeof(model.streamData.inputPath), "%s", "/tmp/same.mp4");
+    set_textbox(&model, LAYOUT_TEXTBOX_ID_OUTPUT_PATH, "/tmp/same.mp4");
+    EXPECT_TRUE(LayoutModel_BuildConvertPlan(&model, &platform, &plan, error, sizeof(error)) != 0);
+    EXPECT_STREQ("The input and output files cannot be the same.", error);
+
+    snprintf(model.streamData.inputPath, sizeof(model.streamData.inputPath), "%s", "/in.mp4");
+    model.dropdownData.selectedValues[LAYOUT_DROPDOWN_ID_OUTPUT_TYPE] = "i";
     model.streamData.streamCounts[LAYOUT_STREAM_ID_VIDEO] = 1;
+    set_textbox(&model, LAYOUT_TEXTBOX_ID_OUTPUT_PATH, "/tmp/frame.bad");
     EXPECT_EQ_INT(0, LayoutModel_BuildConvertPlan(&model, &platform, &plan, error, sizeof(error)));
     EXPECT_STREQ("/tmp/frame.jpg", plan.outputPath);
     EXPECT_TRUE(strstr(plan.filterGraph, "[out_v]") != NULL);
@@ -312,6 +399,7 @@ static void test_utilities_and_interactions(void)
 int main(void)
 {
     test_textbox_insert_delete_and_words();
+    test_textbox_boundary_keys_are_noops();
     test_numberbox_clamps_and_decimal();
     test_tab_focus_cycle();
     test_parse_streams_json();
