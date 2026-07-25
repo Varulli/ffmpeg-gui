@@ -1,13 +1,13 @@
 # ffmpeg-gui
 
-A render of a cube rotating in space with a light source.
+A limited GUI for ffmpeg.
 
 Supports conversions using video, audio, and subtitle streams.
 Features image preview and tab selection.
 
 Download the [latest release](https://github.com/Varulli/ffmpeg-gui/releases/latest) or [build it yourself](https://github.com/Varulli/ffmpeg-gui#build-instructions).
 
-![ffmpeg-gui-demo]()
+![ffmpeg-gui-demo](https://github.com/user-attachments/assets/332d0f82-0879-4c5d-9c65-f492d8801178)
 
 ## Build Instructions
 
