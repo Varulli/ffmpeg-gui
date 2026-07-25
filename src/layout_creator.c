@@ -254,6 +254,7 @@ typedef struct
 {
     TextboxBuffer textboxBuffers[TEXTBOX_ID_DUMMY_LAST];
     bool isInit[TEXTBOX_ID_DUMMY_LAST];
+    bool isEnabled[TEXTBOX_ID_DUMMY_LAST];
     int hoveredTextbox;
     FocusData focusData;
 } TextboxData;
@@ -1313,6 +1314,7 @@ static void copyGuiStateToModel(LayoutModel *model)
             .max = src->numberboxConfig.max,
         };
         model->textboxData.isInit[i] = textboxData.isInit[i];
+        model->textboxData.isEnabled[i] = textboxData.isEnabled[i];
     }
 
     model->textboxData.hoveredTextbox = textboxData.hoveredTextbox;
@@ -1372,6 +1374,7 @@ static void copyModelTextboxesToGui(const LayoutModel *model)
             .max = src->numberboxConfig.max,
         };
         textboxData.isInit[i] = model->textboxData.isInit[i];
+        textboxData.isEnabled[i] = model->textboxData.isEnabled[i];
     }
     textboxData.focusData.focusRegistered = model->textboxData.focusData.focusRegistered;
     textboxData.focusData.focusIndex = model->textboxData.focusData.focusIndex;
@@ -1962,11 +1965,11 @@ void RenderTextbox(
     if (!textboxData.isInit[textboxId])
     {
         textboxData.textboxBuffers[textboxId].numberboxConfig = numberboxConfig;
-        // textboxData.isDisabled[textboxId] = isDisabled;
         textboxData.isInit[textboxId] = true;
     }
 
     textboxData.textboxBuffers[textboxId].charsDefault = charsDefault;
+    textboxData.isEnabled[textboxId] = !isDisabled;
 
     bool focused = (textboxData.focusData.focusIndex == textboxId);
 
@@ -3207,6 +3210,7 @@ void LayoutCreator_Initialize()
     textboxData = (TextboxData){
         .textboxBuffers = {0},
         .isInit = {0},
+        .isEnabled = {0},
         .hoveredTextbox = -1,
         .focusData = {
             .focusRegistered = false,

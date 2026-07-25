@@ -265,6 +265,40 @@ static void test_tab_focus_cycle(void)
     EXPECT_EQ_INT(LAYOUT_TEXTBOX_ID_INPUT_PATH, model.textboxData.focusData.focusIndex);
 }
 
+static void test_tab_skips_disabled_textboxes_and_rejects_hidden_input(void)
+{
+    LayoutModel model;
+    LayoutModel_Init(&model);
+    set_textbox(&model, LAYOUT_TEXTBOX_ID_FPS, "30");
+    model.textboxData.focusData.focusIndex = LAYOUT_TEXTBOX_ID_INPUT_PATH;
+    model.textboxData.isEnabled[LAYOUT_TEXTBOX_ID_FPS] = false;
+
+    GuiInputFrame input = {0};
+    input.keyPressed[LAYOUT_KEY_TAB] = true;
+    input.now = 1.0;
+    LayoutModel_ApplyTextboxInput(&model, &input);
+    EXPECT_EQ_INT(LAYOUT_TEXTBOX_ID_DURATION_START_VIDEO, model.textboxData.focusData.focusIndex);
+
+    model.textboxData.focusData.focusIndex = LAYOUT_TEXTBOX_ID_FPS;
+    memset(&input, 0, sizeof(input));
+    input.typedChars[0] = '9';
+    input.typedCharCount = 1;
+    input.now = 2.0;
+    LayoutModel_ApplyTextboxInput(&model, &input);
+    EXPECT_STREQ("30", model.textboxData.textboxBuffers[LAYOUT_TEXTBOX_ID_FPS].chars);
+    EXPECT_EQ_INT(-1, model.textboxData.focusData.focusIndex);
+
+    for (size_t i = 0; i < LAYOUT_TEXTBOX_ID_DUMMY_LAST; i++)
+    {
+        model.textboxData.isEnabled[i] = false;
+    }
+    memset(&input, 0, sizeof(input));
+    input.keyPressed[LAYOUT_KEY_TAB] = true;
+    input.now = 3.0;
+    LayoutModel_ApplyTextboxInput(&model, &input);
+    EXPECT_EQ_INT(-1, model.textboxData.focusData.focusIndex);
+}
+
 static void test_parse_streams_json(void)
 {
     LayoutModel model;
@@ -402,6 +436,7 @@ int main(void)
     test_textbox_boundary_keys_are_noops();
     test_numberbox_clamps_and_decimal();
     test_tab_focus_cycle();
+    test_tab_skips_disabled_textboxes_and_rejects_hidden_input();
     test_parse_streams_json();
     test_convert_plan_video_audio_subtitles();
     test_convert_plan_errors_and_image();

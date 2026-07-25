@@ -7,7 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define LAYOUT_CLAMP(val, min, max) ((val) < (min) ? (min) : (val) > (max) ? (max) : (val))
+#define LAYOUT_CLAMP(val, min, max) ((val) < (min) ? (min) : (val) > (max) ? (max) \
+                                                                           : (val))
 
 typedef struct
 {
@@ -298,6 +299,10 @@ void LayoutModel_Init(LayoutModel *model)
         return;
     }
     memset(model, 0, sizeof(*model));
+    for (size_t i = 0; i < LAYOUT_TEXTBOX_ID_DUMMY_LAST; i++)
+    {
+        model->textboxData.isEnabled[i] = true;
+    }
     model->textboxData.hoveredTextbox = -1;
     model->textboxData.focusData.focusIndex = -1;
     model->tabData.selectedTab = LAYOUT_TAB_ID_DIMENSIONS;
@@ -327,12 +332,49 @@ static bool input_key(const GuiInputFrame *input, LayoutKey key)
     return input->keyPressed[key] || input->keyRepeated[key];
 }
 
+static bool textbox_focusable(const LayoutModel *model, int textboxId)
+{
+    return textboxId >= 0 &&
+           textboxId < LAYOUT_TEXTBOX_ID_DUMMY_LAST &&
+           model->textboxData.isEnabled[textboxId];
+}
+
+static int next_focusable_textbox(const LayoutModel *model, int startIndex, int direction)
+{
+    int index = startIndex;
+    for (size_t i = 0; i < LAYOUT_TEXTBOX_ID_DUMMY_LAST; i++)
+    {
+        index = (index + direction + LAYOUT_TEXTBOX_ID_DUMMY_LAST) % LAYOUT_TEXTBOX_ID_DUMMY_LAST;
+        if (textbox_focusable(model, index))
+        {
+            return index;
+        }
+    }
+    return -1;
+}
+
+static void focus_textbox(LayoutModel *model, int textboxId, double now)
+{
+    model->textboxData.focusData.focusIndex = textboxId;
+    if (textboxId >= 0)
+    {
+        LayoutTextboxBuffer *buffer = &model->textboxData.textboxBuffers[textboxId];
+        buffer->cursorPosition = buffer->length;
+        model->textboxData.focusData.focusStartTime = now;
+    }
+}
+
 void LayoutModel_ApplyTextboxInput(LayoutModel *model, const GuiInputFrame *input)
 {
     LayoutTextboxBuffer *buffer;
     if (model == NULL || input == NULL)
     {
         return;
+    }
+
+    if (!textbox_focusable(model, model->textboxData.focusData.focusIndex))
+    {
+        model->textboxData.focusData.focusIndex = -1;
     }
 
     if (model->textboxData.focusData.focusIndex >= 0)
@@ -572,25 +614,15 @@ void LayoutModel_ApplyTextboxInput(LayoutModel *model, const GuiInputFrame *inpu
         }
         else if (input_key(input, LAYOUT_KEY_TAB))
         {
-            if (input->shiftDown)
-            {
-                model->textboxData.focusData.focusIndex = (model->textboxData.focusData.focusIndex + LAYOUT_TEXTBOX_ID_DUMMY_LAST - 1) % LAYOUT_TEXTBOX_ID_DUMMY_LAST;
-            }
-            else
-            {
-                model->textboxData.focusData.focusIndex = (model->textboxData.focusData.focusIndex + 1) % LAYOUT_TEXTBOX_ID_DUMMY_LAST;
-            }
-            buffer = &model->textboxData.textboxBuffers[model->textboxData.focusData.focusIndex];
-            buffer->cursorPosition = buffer->length;
-            model->textboxData.focusData.focusStartTime = input->now;
+            int direction = input->shiftDown ? -1 : 1;
+            focus_textbox(model, next_focusable_textbox(model, model->textboxData.focusData.focusIndex, direction), input->now);
         }
     }
     else if (input->keyPressed[LAYOUT_KEY_TAB])
     {
-        model->textboxData.focusData.focusIndex = (model->textboxData.focusData.focusIndex + 1) % LAYOUT_TEXTBOX_ID_DUMMY_LAST;
-        buffer = &model->textboxData.textboxBuffers[model->textboxData.focusData.focusIndex];
-        buffer->cursorPosition = buffer->length;
-        model->textboxData.focusData.focusStartTime = input->now;
+        int direction = input->shiftDown ? -1 : 1;
+        int startIndex = input->shiftDown ? 0 : -1;
+        focus_textbox(model, next_focusable_textbox(model, startIndex, direction), input->now);
     }
 
     if (input->leftMouseReleased && !model->textboxData.focusData.focusRegistered)
@@ -797,6 +829,7 @@ int LayoutModel_BuildConvertPlan(LayoutModel *model, const GuiPlatform *platform
 
     bool outputVideo = outputType == 'v';
     bool gifInput = LayoutModel_ExtensionEqualsIgnoreCase(get_file_extension(model->streamData.inputPath), ".gif");
+    bool gifOutput = LayoutModel_ExtensionEqualsIgnoreCase(outputExt, ".gif");
     bool outputAudio = (outputType == 'a' || (outputVideo && !LayoutModel_ExtensionEqualsIgnoreCase(outputExt, ".gif"))) &&
                        model->streamData.streamCounts[LAYOUT_STREAM_ID_AUDIO] > 0;
     bool outputImage = outputType == 'i';
@@ -897,7 +930,7 @@ int LayoutModel_BuildConvertPlan(LayoutModel *model, const GuiPlatform *platform
     {
         ok = ok && argv_push(&a, "-map") && argv_push(&a, "[out_v]");
     }
-    if (outputVideo && !gifInput)
+    if (outputVideo && !gifOutput)
     {
         ok = ok && argv_push(&a, "-c:v") && argv_push(&a, "libx264") && argv_push(&a, "-movflags") && argv_push(&a, "+faststart");
     }

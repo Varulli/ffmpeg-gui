@@ -67,8 +67,6 @@ int main(void)
     Font fonts[FONT_ID_DUMMY_LAST];
     fonts[FONT_ID_BODY] = LoadFontEx("resources/fonts/consolas.ttf", fontData.fontSizeMax, NULL, 0);
     fonts[FONT_ID_BOLD] = LoadFontEx("resources/fonts/consolas-bold.ttf", fontData.fontSizeMax, NULL, 0);
-    // int codepoints[] = {0x25B2, 0x25B3, 0x25BC, 0x25BD};
-    // fonts[FONT_ID_SYMBOL] = LoadFontEx("resources/fonts/NotoSansJP-Regular.ttf", fontData.fontSizeMax, codepoints, sizeof(codepoints) / sizeof(codepoints[0]));
     for (size_t i = 0; i < FONT_ID_DUMMY_LAST; i++)
     {
         SetTextureFilter(fonts[i].texture, TEXTURE_FILTER_BILINEAR);
@@ -80,7 +78,7 @@ int main(void)
     Clay_Context *clayContext = Clay_Initialize(clayMemory, (Clay_Dimensions){.width = GetScreenWidth(), .height = GetScreenHeight()}, (Clay_ErrorHandler){HandleClayErrors}); // This final argument is new since the video was published
     Clay_SetMeasureTextFunction(Raylib_MeasureText, fonts);
 
-    Clay_SetDebugModeEnabled(true);
+    // Clay_SetDebugModeEnabled(true);
 
     while (!WindowShouldClose())
     {
@@ -88,11 +86,6 @@ int main(void)
         BeginDrawing();
         ClearBackground(BLACK);
         Clay_Raylib_Render(renderCommands, fonts);
-
-        // DrawAllGlyphs(fonts[FONT_ID_BODY], 10, 10, 1, WHITE);
-        // DrawAllGlyphs(fonts[FONT_ID_BOLD], 10, 210, 1, WHITE);
-        // DrawAllGlyphs(fonts[FONT_ID_SYMBOL], 10, 10, 1, WHITE);
-
         EndDrawing();
     }
 

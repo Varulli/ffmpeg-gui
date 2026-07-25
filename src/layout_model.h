@@ -94,6 +94,7 @@ typedef struct
 {
     LayoutTextboxBuffer textboxBuffers[LAYOUT_TEXTBOX_ID_DUMMY_LAST];
     bool isInit[LAYOUT_TEXTBOX_ID_DUMMY_LAST];
+    bool isEnabled[LAYOUT_TEXTBOX_ID_DUMMY_LAST];
     int hoveredTextbox;
     LayoutFocusData focusData;
 } LayoutTextboxData;
