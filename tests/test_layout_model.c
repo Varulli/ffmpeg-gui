@@ -360,6 +360,30 @@ static void test_progress_parsing_and_partial_chunks(void)
     EXPECT_NEAR(1.0, model.streamData.progress.percent, 0.001);
 }
 
+static void test_progress_eta_estimation(void)
+{
+    LayoutConvertProgress progress = {
+        .active = true,
+        .finished = false,
+        .hasPercent = true,
+        .outTimeSeconds = 25.0,
+        .estimatedDurationSeconds = 100.0,
+        .speed = 2.5,
+    };
+    EXPECT_NEAR(30.0, LayoutModel_EstimateProgressEtaSeconds(&progress), 0.001);
+
+    progress.speed = 0.0;
+    EXPECT_NEAR(-1.0, LayoutModel_EstimateProgressEtaSeconds(&progress), 0.001);
+
+    progress.speed = 2.5;
+    progress.hasPercent = false;
+    EXPECT_NEAR(-1.0, LayoutModel_EstimateProgressEtaSeconds(&progress), 0.001);
+
+    progress.hasPercent = true;
+    progress.finished = true;
+    EXPECT_NEAR(-1.0, LayoutModel_EstimateProgressEtaSeconds(&progress), 0.001);
+}
+
 static void test_convert_duration_estimation(void)
 {
     LayoutModel model;
@@ -510,6 +534,7 @@ int main(void)
     test_tab_skips_disabled_textboxes_and_rejects_hidden_input();
     test_parse_streams_json();
     test_progress_parsing_and_partial_chunks();
+    test_progress_eta_estimation();
     test_convert_duration_estimation();
     test_convert_plan_video_audio_subtitles();
     test_convert_plan_errors_and_image();

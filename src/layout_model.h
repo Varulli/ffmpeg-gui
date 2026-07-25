@@ -211,6 +211,7 @@ void LayoutModel_BeginConvertProgress(LayoutModel *model);
 void LayoutModel_AppendConvertOutput(LayoutModel *model, const char *data, size_t dataLength);
 bool LayoutModel_ParseProgressLine(LayoutModel *model, const char *line);
 double LayoutModel_EstimateConvertDuration(const LayoutModel *model);
+double LayoutModel_EstimateProgressEtaSeconds(const LayoutConvertProgress *progress);
 const char *LayoutModel_SanitizeErrorMessage(const char *message);
 void LayoutModel_SelectDropdownHoveredOption(LayoutModel *model, LayoutDropdownID dropdownId);
 void LayoutModel_SelectTab(LayoutModel *model, LayoutTabID tabId);

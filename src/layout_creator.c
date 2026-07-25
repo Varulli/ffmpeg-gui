@@ -2301,52 +2301,89 @@ static void formatSeconds(char *buffer, size_t bufferSize, double seconds)
 void RenderConvertProgress(void)
 {
     LayoutConvertProgress *progress = &streamData.progress;
-    static char text[128];
+    const float progressWidth = 360.0f;
+    static char lineOne[128];
+    static char lineTwo[128];
     static char outTime[32];
+    static char totalTime[32];
+    static char etaTime[32];
     formatSeconds(outTime, sizeof(outTime), progress->outTimeSeconds);
+    formatSeconds(totalTime, sizeof(totalTime), progress->estimatedDurationSeconds);
 
     if (progress->hasPercent)
     {
         snprintf(
-            text,
-            sizeof(text),
-            "%3.0f%%  %s  %.2fx",
+            lineOne,
+            sizeof(lineOne),
+            "%3.0f%%  Converted %s / %s",
             progress->percent * 100.0,
             outTime,
-            progress->speed > 0.0 ? progress->speed : 0.0);
+            totalTime);
     }
     else
     {
         snprintf(
-            text,
-            sizeof(text),
-            "Processing  %s  %.2fx",
-            outTime,
-            progress->speed > 0.0 ? progress->speed : 0.0);
+            lineOne,
+            sizeof(lineOne),
+            "Converted %s",
+            outTime);
     }
 
-    Clay_String str = {
+    if (progress->finished)
+    {
+        snprintf(lineTwo, sizeof(lineTwo), "%s", "Complete");
+    }
+    else
+    {
+        double eta = LayoutModel_EstimateProgressEtaSeconds(progress);
+        if (eta >= 0.0)
+        {
+            formatSeconds(etaTime, sizeof(etaTime), eta);
+            snprintf(
+                lineTwo,
+                sizeof(lineTwo),
+                "Processing %.2fx realtime  ETA %s",
+                progress->speed > 0.0 ? progress->speed : 0.0,
+                etaTime);
+        }
+        else
+        {
+            snprintf(
+                lineTwo,
+                sizeof(lineTwo),
+                "Processing %.2fx realtime",
+                progress->speed > 0.0 ? progress->speed : 0.0);
+        }
+    }
+
+    Clay_String lineOneString = {
         .isStaticallyAllocated = false,
-        .length = (int32_t)strlen(text),
-        .chars = text,
+        .length = (int32_t)strlen(lineOne),
+        .chars = lineOne,
+    };
+    Clay_String lineTwoString = {
+        .isStaticallyAllocated = false,
+        .length = (int32_t)strlen(lineTwo),
+        .chars = lineTwo,
     };
 
     CLAY({
         .layout = {
             .layoutDirection = CLAY_TOP_TO_BOTTOM,
             .sizing = {
-                .width = CLAY_SIZING_FIXED(220),
+                .width = CLAY_SIZING_FIXED(progressWidth),
             },
             .childGap = fontData.charHeightOverFour,
         },
     })
     {
-        CLAY_TEXT(str, TEXT_CONFIG_DEFAULT);
+        CLAY_TEXT(lineOneString, TEXT_CONFIG_DEFAULT);
+        CLAY_TEXT(lineTwoString, TEXT_CONFIG_FAINT);
 
         CLAY({
             .layout = {
                 .sizing = {
-                    .width = CLAY_SIZING_FIXED(220),
+                    .width = CLAY_SIZING_FIXED(progressWidth),
                     .height = CLAY_SIZING_FIXED(8),
                 },
             },
@@ -2356,7 +2393,7 @@ void RenderConvertProgress(void)
         {
             if (progress->hasPercent)
             {
-                float fillWidth = (float)(progress->percent * 220.0);
+                float fillWidth = (float)(progress->percent * progressWidth);
                 CLAY({
                     .layout = {
                         .sizing = {

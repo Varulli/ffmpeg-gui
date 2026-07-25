@@ -1272,6 +1272,26 @@ bool LayoutModel_ParseProgressLine(LayoutModel *model, const char *line)
     return true;
 }
 
+double LayoutModel_EstimateProgressEtaSeconds(const LayoutConvertProgress *progress)
+{
+    if (progress == NULL ||
+        progress->finished ||
+        !progress->hasPercent ||
+        progress->estimatedDurationSeconds <= 0.0 ||
+        progress->outTimeSeconds < 0.0 ||
+        progress->speed <= 0.0)
+    {
+        return -1.0;
+    }
+
+    double remaining = progress->estimatedDurationSeconds - progress->outTimeSeconds;
+    if (remaining <= 0.0)
+    {
+        return 0.0;
+    }
+    return remaining / progress->speed;
+}
+
 void LayoutModel_AppendConvertOutput(LayoutModel *model, const char *data, size_t dataLength)
 {
     if (model == NULL || data == NULL || dataLength == 0)
