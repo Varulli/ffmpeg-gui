@@ -70,6 +70,31 @@ static int set_error(char *error, size_t errorCap, const char *fmt, ...)
     return 1;
 }
 
+static void append_convert_error_output(LayoutModel *model, const char *data, size_t dataLength)
+{
+    if (model == NULL || data == NULL || dataLength == 0)
+    {
+        return;
+    }
+
+    size_t available = sizeof(model->streamData.convertOutput) - model->streamData.convertOutputLength - 1;
+    if (available == 0)
+    {
+        return;
+    }
+
+    size_t copyLength = dataLength < available ? dataLength : available;
+    memcpy(model->streamData.convertOutput + model->streamData.convertOutputLength, data, copyLength);
+    model->streamData.convertOutputLength += copyLength;
+    model->streamData.convertOutput[model->streamData.convertOutputLength] = '\0';
+}
+
+static void append_convert_error_line(LayoutModel *model, const char *line)
+{
+    append_convert_error_output(model, line, strlen(line));
+    append_convert_error_output(model, "\n", 1);
+}
+
 static void sb_init(LayoutStringBuilder *sb)
 {
     sb->buffer = NULL;
@@ -290,6 +315,80 @@ static bool split_output_path(const char *outputPath, char *dir, size_t dirCap, 
     memcpy(name, filename, nameLen);
     name[nameLen] = '\0';
     return true;
+}
+
+static double parse_seconds(const char *s)
+{
+    if (s == NULL || s[0] == '\0')
+    {
+        return -1.0;
+    }
+    char *end = NULL;
+    double val = strtod(s, &end);
+    if (end == s || val < 0.0)
+    {
+        return -1.0;
+    }
+    return val;
+}
+
+static double parse_timecode_seconds(const char *s)
+{
+    if (s == NULL || s[0] == '\0')
+    {
+        return -1.0;
+    }
+
+    int hours = 0;
+    int minutes = 0;
+    double seconds = 0.0;
+    if (sscanf(s, "%d:%d:%lf", &hours, &minutes, &seconds) == 3)
+    {
+        if (hours < 0 || minutes < 0 || minutes > 59 || seconds < 0.0)
+        {
+            return -1.0;
+        }
+        return hours * 3600.0 + minutes * 60.0 + seconds;
+    }
+
+    return parse_seconds(s);
+}
+
+static bool value_is_end(const char *s)
+{
+    return s == NULL || s[0] == '\0' || strcmp(s, "end") == 0;
+}
+
+static double estimate_trimmed_duration(const LayoutModel *model, LayoutTextboxID startId, LayoutTextboxID endId, LayoutTextboxID speedId)
+{
+    double start = parse_seconds(LayoutModel_GetTextboxValue(model, startId));
+    if (start < 0.0)
+    {
+        start = 0.0;
+    }
+
+    const char *endText = LayoutModel_GetTextboxValue(model, endId);
+    double end = -1.0;
+    if (value_is_end(endText))
+    {
+        end = model->streamData.inputDurationSeconds;
+    }
+    else
+    {
+        end = parse_seconds(endText);
+    }
+    if (end < 0.0 || end < start)
+    {
+        return -1.0;
+    }
+
+    double speed = parse_seconds(LayoutModel_GetTextboxValue(model, speedId));
+    if (speed <= 0.0)
+    {
+        return -1.0;
+    }
+
+    return (end - start) / speed;
 }
 
 void LayoutModel_Init(LayoutModel *model)
@@ -654,6 +753,7 @@ int LayoutModel_ParseStreamsJson(LayoutModel *model, const char *json, size_t le
     model->streamData.streamCounts[LAYOUT_STREAM_ID_VIDEO] = 0;
     model->streamData.streamCounts[LAYOUT_STREAM_ID_AUDIO] = 0;
     model->streamData.streamCounts[LAYOUT_STREAM_ID_SUBTITLES] = 0;
+    model->streamData.inputDurationSeconds = -1.0;
 
     cJSON *stream = NULL;
     cJSON_ArrayForEach(stream, streams)
@@ -678,6 +778,24 @@ int LayoutModel_ParseStreamsJson(LayoutModel *model, const char *json, size_t le
         {
             cJSON_Delete(root);
             return set_error(error, errorCap, "Input metadata contains a stream without codec_type.");
+        }
+    }
+
+    cJSON *format = cJSON_GetObjectItemCaseSensitive(root, "format");
+    if (cJSON_IsObject(format))
+    {
+        cJSON *duration = cJSON_GetObjectItemCaseSensitive(format, "duration");
+        if (cJSON_IsString(duration) && duration->valuestring != NULL)
+        {
+            double seconds = parse_seconds(duration->valuestring);
+            if (seconds >= 0.0)
+            {
+                model->streamData.inputDurationSeconds = seconds;
+            }
+        }
+        else if (cJSON_IsNumber(duration) && duration->valuedouble >= 0.0)
+        {
+            model->streamData.inputDurationSeconds = duration->valuedouble;
         }
     }
 
@@ -979,6 +1097,221 @@ void LayoutModel_FreeConvertPlan(ConvertPlan *plan)
     free(plan->filterGraph);
     free(plan->outputPath);
     memset(plan, 0, sizeof(*plan));
+}
+
+double LayoutModel_EstimateConvertDuration(const LayoutModel *model)
+{
+    if (model == NULL)
+    {
+        return -1.0;
+    }
+
+    char outputType = LayoutModel_GetDropdownValue(model, LAYOUT_DROPDOWN_ID_OUTPUT_TYPE)[0];
+    if (outputType == 'i')
+    {
+        return -1.0;
+    }
+
+    double best = -1.0;
+    if (outputType == 'v')
+    {
+        double videoDuration = estimate_trimmed_duration(
+            model,
+            LAYOUT_TEXTBOX_ID_DURATION_START_VIDEO,
+            LAYOUT_TEXTBOX_ID_DURATION_END_VIDEO,
+            LAYOUT_TEXTBOX_ID_SPEED_VIDEO);
+        if (videoDuration >= 0.0)
+        {
+            best = videoDuration;
+        }
+    }
+
+    bool includeAudio = (outputType == 'a' || outputType == 'v') &&
+                        model->streamData.streamCounts[LAYOUT_STREAM_ID_AUDIO] > 0;
+    if (includeAudio)
+    {
+        double audioDuration = estimate_trimmed_duration(
+            model,
+            LAYOUT_TEXTBOX_ID_DURATION_START_AUDIO,
+            LAYOUT_TEXTBOX_ID_DURATION_END_AUDIO,
+            LAYOUT_TEXTBOX_ID_SPEED_AUDIO);
+        if (audioDuration >= 0.0 && audioDuration > best)
+        {
+            best = audioDuration;
+        }
+    }
+
+    return best > 0.0 ? best : -1.0;
+}
+
+void LayoutModel_ResetConvertProgress(LayoutModel *model)
+{
+    if (model == NULL)
+    {
+        return;
+    }
+    model->streamData.progress = (LayoutConvertProgress){0};
+    model->streamData.progress.estimatedDurationSeconds = -1.0;
+    model->streamData.progressPartialLine[0] = '\0';
+    model->streamData.progressPartialLineLength = 0;
+}
+
+void LayoutModel_BeginConvertProgress(LayoutModel *model)
+{
+    if (model == NULL)
+    {
+        return;
+    }
+    LayoutModel_ResetConvertProgress(model);
+    model->streamData.progress.active = true;
+    model->streamData.progress.estimatedDurationSeconds = LayoutModel_EstimateConvertDuration(model);
+    model->streamData.progress.hasPercent = model->streamData.progress.estimatedDurationSeconds > 0.0;
+    snprintf(model->streamData.progress.status, sizeof(model->streamData.progress.status), "%s", "continue");
+}
+
+static void update_progress_percent(LayoutModel *model)
+{
+    LayoutConvertProgress *progress = &model->streamData.progress;
+    if (progress->estimatedDurationSeconds > 0.0)
+    {
+        progress->hasPercent = true;
+        progress->percent = progress->outTimeSeconds / progress->estimatedDurationSeconds;
+        if (progress->percent < 0.0)
+        {
+            progress->percent = 0.0;
+        }
+        if (progress->percent > 1.0)
+        {
+            progress->percent = 1.0;
+        }
+    }
+    else
+    {
+        progress->hasPercent = false;
+        progress->percent = 0.0;
+    }
+}
+
+bool LayoutModel_ParseProgressLine(LayoutModel *model, const char *line)
+{
+    if (model == NULL || line == NULL)
+    {
+        return false;
+    }
+
+    const char *equals = strchr(line, '=');
+    if (equals == NULL)
+    {
+        return false;
+    }
+
+    size_t keyLength = (size_t)(equals - line);
+    const char *value = equals + 1;
+    LayoutConvertProgress *progress = &model->streamData.progress;
+
+    if (keyLength == 5 && strncmp(line, "frame", keyLength) == 0)
+    {
+        progress->frame = atoi(value);
+    }
+    else if (keyLength == 3 && strncmp(line, "fps", keyLength) == 0)
+    {
+        progress->fps = parse_seconds(value);
+    }
+    else if (keyLength == 7 && strncmp(line, "bitrate", keyLength) == 0)
+    {
+        snprintf(progress->bitrate, sizeof(progress->bitrate), "%s", value);
+    }
+    else if (keyLength == 5 && strncmp(line, "speed", keyLength) == 0)
+    {
+        char speedBuffer[32];
+        snprintf(speedBuffer, sizeof(speedBuffer), "%s", value);
+        char *x = strchr(speedBuffer, 'x');
+        if (x != NULL)
+        {
+            *x = '\0';
+        }
+        progress->speed = parse_seconds(speedBuffer);
+    }
+    else if ((keyLength == 11 && strncmp(line, "out_time_us", keyLength) == 0) ||
+             (keyLength == 11 && strncmp(line, "out_time_ms", keyLength) == 0))
+    {
+        double units = parse_seconds(value);
+        if (units >= 0.0)
+        {
+            progress->outTimeSeconds = units / 1000000.0;
+            update_progress_percent(model);
+        }
+    }
+    else if (keyLength == 8 && strncmp(line, "out_time", keyLength) == 0)
+    {
+        double seconds = parse_timecode_seconds(value);
+        if (seconds >= 0.0)
+        {
+            progress->outTimeSeconds = seconds;
+            update_progress_percent(model);
+        }
+    }
+    else if (keyLength == 8 && strncmp(line, "progress", keyLength) == 0)
+    {
+        snprintf(progress->status, sizeof(progress->status), "%s", value);
+        if (strcmp(value, "end") == 0)
+        {
+            progress->finished = true;
+            progress->active = false;
+            if (progress->hasPercent)
+            {
+                progress->percent = 1.0;
+            }
+        }
+    }
+    else
+    {
+        return false;
+    }
+
+    return true;
+}
+
+void LayoutModel_AppendConvertOutput(LayoutModel *model, const char *data, size_t dataLength)
+{
+    if (model == NULL || data == NULL || dataLength == 0)
+    {
+        return;
+    }
+
+    for (size_t i = 0; i < dataLength; i++)
+    {
+        char c = data[i];
+        if (c == '\r')
+        {
+            continue;
+        }
+
+        if (c == '\n')
+        {
+            model->streamData.progressPartialLine[model->streamData.progressPartialLineLength] = '\0';
+            if (model->streamData.progressPartialLineLength > 0 &&
+                !LayoutModel_ParseProgressLine(model, model->streamData.progressPartialLine))
+            {
+                append_convert_error_line(model, model->streamData.progressPartialLine);
+            }
+            model->streamData.progressPartialLineLength = 0;
+            model->streamData.progressPartialLine[0] = '\0';
+            continue;
+        }
+
+        if (model->streamData.progressPartialLineLength + 1 < sizeof(model->streamData.progressPartialLine))
+        {
+            model->streamData.progressPartialLine[model->streamData.progressPartialLineLength++] = c;
+        }
+        else
+        {
+            append_convert_error_output(model, model->streamData.progressPartialLine, model->streamData.progressPartialLineLength);
+            append_convert_error_output(model, &c, 1);
+            model->streamData.progressPartialLineLength = 0;
+            model->streamData.progressPartialLine[0] = '\0';
+        }
+    }
 }
 
 const char *LayoutModel_SanitizeErrorMessage(const char *message)

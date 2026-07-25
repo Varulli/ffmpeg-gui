@@ -304,9 +304,13 @@ typedef struct
 {
     char inputPath[TEXTBOX_BUFFER_SIZE];
     size_t streamCounts[STREAM_ID_DUMMY_LAST];
+    double inputDurationSeconds;
     ChildProcessData convertProcess;
     char convertOutput[8192];
     size_t convertOutputLength;
+    LayoutConvertProgress progress;
+    char progressPartialLine[512];
+    size_t progressPartialLineLength;
 } StreamData;
 
 typedef struct
@@ -616,25 +620,6 @@ void reportErrorf(const char *fmt, ...)
         snprintf(errorPopupData.popups[errorPopupData.count - 1].message, sizeof(errorPopupData.popups[errorPopupData.count - 1].message), "%s", displayMessage);
         errorPopupData.popups[errorPopupData.count - 1].createdAt = GetTime();
     }
-}
-
-static void appendProcessOutput(const char *data, size_t dataLength)
-{
-    if (data == NULL || dataLength == 0)
-    {
-        return;
-    }
-
-    size_t available = sizeof(streamData.convertOutput) - streamData.convertOutputLength - 1;
-    if (available == 0)
-    {
-        return;
-    }
-
-    size_t copyLength = dataLength < available ? dataLength : available;
-    memcpy(streamData.convertOutput + streamData.convertOutputLength, data, copyLength);
-    streamData.convertOutputLength += copyLength;
-    streamData.convertOutput[streamData.convertOutputLength] = '\0';
 }
 
 static void updateErrorPopups(void)
@@ -1342,8 +1327,12 @@ static void copyGuiStateToModel(LayoutModel *model)
     {
         model->streamData.streamCounts[i] = streamData.streamCounts[i];
     }
+    model->streamData.inputDurationSeconds = streamData.inputDurationSeconds;
     memcpy(model->streamData.convertOutput, streamData.convertOutput, sizeof(model->streamData.convertOutput));
     model->streamData.convertOutputLength = streamData.convertOutputLength;
+    model->streamData.progress = streamData.progress;
+    memcpy(model->streamData.progressPartialLine, streamData.progressPartialLine, sizeof(model->streamData.progressPartialLine));
+    model->streamData.progressPartialLineLength = streamData.progressPartialLineLength;
 
     model->previewImageData.imageSize = previewImageData.imageSize;
     model->previewImageData.imageSizeMin = previewImageData.imageSizeMin;
@@ -1355,6 +1344,21 @@ static void copyGuiStateToModel(LayoutModel *model)
         memcpy(model->errorPopupData.popups[i].message, errorPopupData.popups[i].message, sizeof(model->errorPopupData.popups[i].message));
         model->errorPopupData.popups[i].createdAt = errorPopupData.popups[i].createdAt;
     }
+}
+
+static void copyModelStreamToGui(const LayoutModel *model)
+{
+    memcpy(streamData.inputPath, model->streamData.inputPath, sizeof(streamData.inputPath));
+    for (size_t i = 0; i < STREAM_ID_DUMMY_LAST; i++)
+    {
+        streamData.streamCounts[i] = model->streamData.streamCounts[i];
+    }
+    streamData.inputDurationSeconds = model->streamData.inputDurationSeconds;
+    memcpy(streamData.convertOutput, model->streamData.convertOutput, sizeof(streamData.convertOutput));
+    streamData.convertOutputLength = model->streamData.convertOutputLength;
+    streamData.progress = model->streamData.progress;
+    memcpy(streamData.progressPartialLine, model->streamData.progressPartialLine, sizeof(streamData.progressPartialLine));
+    streamData.progressPartialLineLength = model->streamData.progressPartialLineLength;
 }
 
 static void copyModelTextboxesToGui(const LayoutModel *model)
@@ -1434,11 +1438,16 @@ int convert()
     LOG("cmd = \"%s\"", cmdline);
     free(cmdline);
 
+    LayoutModel_BeginConvertProgress(&model);
+    copyModelStreamToGui(&model);
+
     ret = childCreate(&streamData.convertProcess, plan.argv);
     LayoutModel_FreeConvertPlan(&plan);
     if (ret)
     {
         ERROR("Failed to create child process (%d)", ret);
+        LayoutModel_ResetConvertProgress(&model);
+        copyModelStreamToGui(&model);
         return ret;
     }
 
@@ -1472,7 +1481,7 @@ void HandleLoadInputButtonInteraction(
         int ret = snprintf(
             buffer,
             sizeof(buffer),
-            "ffprobe -v error -show_streams -of json \"%s\"",
+            "ffprobe -v error -show_streams -show_format -of json \"%s\"",
             getTextboxValue(TEXTBOX_ID_INPUT_PATH));
 
         if (ret < 0 || ret >= sizeof(buffer))
@@ -1531,6 +1540,7 @@ void HandleLoadInputButtonInteraction(
         {
             streamData.streamCounts[i] = model.streamData.streamCounts[i];
         }
+        streamData.inputDurationSeconds = model.streamData.inputDurationSeconds;
         LOG("v: %zu, a: %zu, s: %zu", streamData.streamCounts[STREAM_ID_VIDEO], streamData.streamCounts[STREAM_ID_AUDIO], streamData.streamCounts[STREAM_ID_SUBTITLES]);
 
         snprintf(streamData.inputPath, sizeof(streamData.inputPath), "%s", trim(getTextboxValue(TEXTBOX_ID_INPUT_PATH)));
@@ -2263,6 +2273,104 @@ void RenderButton(
             Clay_OnHover(onHoverFunction, userData);
         }
         CLAY_TEXT(label, /*buttonData.isDisabled[buttonId]*/ isDisabled ? TEXT_CONFIG_FAINT : TEXT_CONFIG_BOLD);
+    }
+}
+
+static void formatSeconds(char *buffer, size_t bufferSize, double seconds)
+{
+    if (seconds < 0.0)
+    {
+        snprintf(buffer, bufferSize, "--:--");
+        return;
+    }
+
+    int total = (int)(seconds + 0.5);
+    int hours = total / 3600;
+    int minutes = (total / 60) % 60;
+    int secs = total % 60;
+    if (hours > 0)
+    {
+        snprintf(buffer, bufferSize, "%d:%02d:%02d", hours, minutes, secs);
+    }
+    else
+    {
+        snprintf(buffer, bufferSize, "%02d:%02d", minutes, secs);
+    }
+}
+
+void RenderConvertProgress(void)
+{
+    LayoutConvertProgress *progress = &streamData.progress;
+    static char text[128];
+    static char outTime[32];
+    formatSeconds(outTime, sizeof(outTime), progress->outTimeSeconds);
+
+    if (progress->hasPercent)
+    {
+        snprintf(
+            text,
+            sizeof(text),
+            "%3.0f%%  %s  %.2fx",
+            progress->percent * 100.0,
+            outTime,
+            progress->speed > 0.0 ? progress->speed : 0.0);
+    }
+    else
+    {
+        snprintf(
+            text,
+            sizeof(text),
+            "Processing  %s  %.2fx",
+            outTime,
+            progress->speed > 0.0 ? progress->speed : 0.0);
+    }
+
+    Clay_String str = {
+        .isStaticallyAllocated = false,
+        .length = (int32_t)strlen(text),
+        .chars = text,
+    };
+
+    CLAY({
+        .layout = {
+            .layoutDirection = CLAY_TOP_TO_BOTTOM,
+            .sizing = {
+                .width = CLAY_SIZING_FIXED(220),
+            },
+            .childGap = fontData.charHeightOverFour,
+        },
+    })
+    {
+        CLAY_TEXT(str, TEXT_CONFIG_DEFAULT);
+
+        CLAY({
+            .layout = {
+                .sizing = {
+                    .width = CLAY_SIZING_FIXED(220),
+                    .height = CLAY_SIZING_FIXED(8),
+                },
+            },
+            .backgroundColor = COLOR_BG_TEXTBOX,
+            .cornerRadius = CLAY_CORNER_RADIUS(4),
+        })
+        {
+            if (progress->hasPercent)
+            {
+                float fillWidth = (float)(progress->percent * 220.0);
+                CLAY({
+                    .layout = {
+                        .sizing = {
+                            .width = CLAY_SIZING_FIXED(fillWidth),
+                            .height = CLAY_SIZING_FIXED(8),
+                        },
+                    },
+                    .backgroundColor = COLOR_BG_THUMB,
+                    .cornerRadius = CLAY_CORNER_RADIUS(4),
+                })
+                {
+                }
+            }
+        }
     }
 }
 
@@ -3241,6 +3349,7 @@ void LayoutCreator_Initialize()
     streamData = (StreamData){
         .inputPath = {0},
         .streamCounts = {0},
+        .inputDurationSeconds = -1.0,
         .convertProcess = {
 #ifdef _WIN32
             .process = NULL,
@@ -3252,6 +3361,9 @@ void LayoutCreator_Initialize()
         },
         .convertOutput = {0},
         .convertOutputLength = 0,
+        .progress = {0},
+        .progressPartialLine = {0},
+        .progressPartialLineLength = 0,
     };
 
     errorPopupData = (ErrorPopupData){0};
@@ -3310,7 +3422,10 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
             int n = childRead(&streamData.convertProcess, buffer, sizeof(buffer));
             if (n > 0)
             {
-                appendProcessOutput(buffer, (size_t)n);
+                LayoutModel model;
+                copyGuiStateToModel(&model);
+                LayoutModel_AppendConvertOutput(&model, buffer, (size_t)n);
+                copyModelStreamToGui(&model);
                 LOG("%s", buffer);
             }
             else
@@ -3321,6 +3436,13 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
 
         if (childExited(&streamData.convertProcess))
         {
+            if (streamData.progressPartialLineLength > 0)
+            {
+                LayoutModel model;
+                copyGuiStateToModel(&model);
+                LayoutModel_AppendConvertOutput(&model, "\n", 1);
+                copyModelStreamToGui(&model);
+            }
             if (streamData.convertOutputLength > 0)
             {
                 const char *errorMessage = sanitizeErrorMessage(streamData.convertOutput);
@@ -3328,6 +3450,13 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                 {
                     reportErrorf("%s", errorMessage);
                 }
+            }
+            if (streamData.convertOutputLength == 0 && !streamData.progress.finished)
+            {
+                LayoutModel model;
+                copyGuiStateToModel(&model);
+                LayoutModel_ResetConvertProgress(&model);
+                copyModelStreamToGui(&model);
             }
             childReset(&streamData.convertProcess);
         }
@@ -3579,6 +3708,7 @@ Clay_RenderCommandArray LayoutCreator_CreateLayout()
                         HandleConvertCancelButtonInteraction,
                         0,
                         buttonPadding);
+                    RenderConvertProgress();
                 }
                 else
                 {

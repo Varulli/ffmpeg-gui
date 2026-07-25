@@ -116,10 +116,29 @@ typedef struct
 
 typedef struct
 {
+    bool active;
+    bool finished;
+    bool hasPercent;
+    double percent;
+    double outTimeSeconds;
+    double estimatedDurationSeconds;
+    int frame;
+    double fps;
+    char bitrate[32];
+    double speed;
+    char status[32];
+} LayoutConvertProgress;
+
+typedef struct
+{
     char inputPath[LAYOUT_TEXTBOX_BUFFER_SIZE];
     size_t streamCounts[LAYOUT_STREAM_ID_DUMMY_LAST];
+    double inputDurationSeconds;
     char convertOutput[8192];
     size_t convertOutputLength;
+    LayoutConvertProgress progress;
+    char progressPartialLine[512];
+    size_t progressPartialLineLength;
 } LayoutStreamData;
 
 typedef struct
@@ -187,6 +206,11 @@ void LayoutModel_ApplyTextboxInput(LayoutModel *model, const GuiInputFrame *inpu
 int LayoutModel_ParseStreamsJson(LayoutModel *model, const char *json, size_t len, char *error, size_t errorCap);
 int LayoutModel_BuildConvertPlan(LayoutModel *model, const GuiPlatform *platform, ConvertPlan *out, char *error, size_t errorCap);
 void LayoutModel_FreeConvertPlan(ConvertPlan *plan);
+void LayoutModel_ResetConvertProgress(LayoutModel *model);
+void LayoutModel_BeginConvertProgress(LayoutModel *model);
+void LayoutModel_AppendConvertOutput(LayoutModel *model, const char *data, size_t dataLength);
+bool LayoutModel_ParseProgressLine(LayoutModel *model, const char *line);
+double LayoutModel_EstimateConvertDuration(const LayoutModel *model);
 const char *LayoutModel_SanitizeErrorMessage(const char *message);
 void LayoutModel_SelectDropdownHoveredOption(LayoutModel *model, LayoutDropdownID dropdownId);
 void LayoutModel_SelectTab(LayoutModel *model, LayoutTabID tabId);
