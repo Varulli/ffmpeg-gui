@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.5)
 
 project(ffmpeg-gui VERSION 1.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 99)
