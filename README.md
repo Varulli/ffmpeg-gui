@@ -1,8 +1,8 @@
 # ffmpeg-gui
 
-A limited GUI for ffmpeg.
+A limited GUI for simple media conversions that sits on top of the [ffmpeg command-line tool](https://www.ffmpeg.org/download.html).
 
-Supports conversions using video, audio, and subtitle streams.
+Supports basic conversions using video, audio, and subtitle streams.
 Features image preview and tab selection.
 
 Download the [latest release](https://github.com/Varulli/ffmpeg-gui/releases/latest) or [build it yourself](https://github.com/Varulli/ffmpeg-gui#build-instructions).
@@ -14,6 +14,7 @@ Download the [latest release](https://github.com/Varulli/ffmpeg-gui/releases/lat
 ### Requirements
 - C compiler
 - CMake 3.5+
+- ffmpeg
 
 ### Steps
 ```
