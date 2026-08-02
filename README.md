@@ -14,7 +14,6 @@ Download the [latest release](https://github.com/Varulli/ffmpeg-gui/releases/lat
 ### Requirements
 - C compiler
 - CMake 3.5+
-- ffmpeg
 
 ### Steps
 ```
